@@ -19,3 +19,10 @@ TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
 POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
 CF_ACCOUNT_ID = "PLACEHOLDER_CLOUDFLARE_ACCOUNT_ID"
 CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
+
+# Tracks per-vendor connection status (both CLI-auth confirmations and manual-paste writes) so
+# the checklist survives across visits. Actually provisioned already (via the Cloudflare MCP
+# tools available in the build session) — this ID is real, not a placeholder.
+[[kv_namespaces]]
+binding = "STATUS"
+id = "c2f4d507f9c64a77b3d7c28b4e4b83c9"

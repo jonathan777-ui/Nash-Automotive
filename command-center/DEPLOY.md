@@ -139,6 +139,28 @@ path, not onboarding a real key yet.
   request shape there (most likely: the body needs to be a single object instead of a one-element
   array, or vice versa). Tell me what the error said and I'll fix it from here.
 
-Once both checkpoints are verified, tell me the Worker's URL and that the two test secrets landed
-correctly — checkpoint 3 (the full vendor field set, including which vendors get the CLI-auth
-path instead of a paste form) picks up from there.
+## 10. Verify checkpoint 3 — the full checklist
+
+No extra setup needed here — the `STATUS` KV namespace is already provisioned (real ID already
+in `wrangler.toml`), so `npx wrangler deploy` picks it up automatically.
+
+The page now lists every vendor from `02 - Launch Checklist`, split into two sections:
+
+- **CLI-auth** (GitHub, Netlify, Oracle, Google Cloud): each row shows the exact command to run
+  locally, and a "Mark connected" button that just records status in KV — it does not receive or
+  store a secret itself. The actual credential material for these is generated and written to
+  Secrets Store separately, by you (or Claude Code, if you're doing this inside a live session)
+  running the CLI command and then `wrangler secrets-store secret create ...` for whatever comes
+  out of it.
+- **Manual paste** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Documenso, n8n): same
+  paste-and-save flow as checkpoint 2, now for the full set. n8n has two fields (instance URL +
+  API key) — both get written before the row marks itself connected.
+
+Rows marked **⚠ unconfirmed** (Oracle, Google Cloud, Gemini) are ones where I could not verify the
+CLI-auth assumption from here — see the `uncertain` comments in `src/vendors.ts` for exactly what's
+unverified about each. Worth a quick real check on your end before you rely on any of those three
+matching the GitHub/Netlify pattern.
+
+Once you've gone through the full checklist in one session (per what you said you'd do), tell me
+which rows landed cleanly and which didn't — including whether any of the three unconfirmed CLI
+rows actually turned out to need the manual-paste path instead.

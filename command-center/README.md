@@ -9,18 +9,18 @@ Cloudflare account's existing Workers directly), so there was nothing to restruc
 Nothing else in the build (n8n, the scraper, the KB generator, Twenty CRM wiring) can proceed
 without credentials being gathered somewhere — that's why this is Piece 1.
 
-## Status: checkpoints 1 & 2 code-complete, neither deployed/verified yet
+## Status: all three checkpoints code-complete, none deployed/verified yet
 
 Per the staged build-out, the wizard is checked in at three checkpoints:
 
 1. **Auth working** — don't proceed past this un-gated. *(code-complete)*
 2. Form + Secrets Store write working for a couple of test credentials. *(code-complete)*
-3. Full field set + confirmation flow. *(not started)*
+3. Full field set + confirmation flow. *(code-complete)*
 
-Both 1 and 2 were built and typechecked in the same pass rather than waiting for a live
-deployment cycle between them, since nothing here can be deployed from this session anyway — see
-`DEPLOY.md`. Deploy and verify both together in one pass, in the order DEPLOY.md lays out (Access
-gate first, then the form behind it).
+All three were built and typechecked in the same pass rather than waiting for a live deployment
+cycle between each, since nothing here can be deployed from this session anyway and you said
+you'd rather do the whole real setup in one sitting once it's built — see `DEPLOY.md` for the
+full deploy + verify sequence, in order (Access gate first, form behind it, then the checklist).
 
 ### Checkpoint 1 — auth gate
 
@@ -47,21 +47,38 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   plain Wrangler secret, not something stored in Secrets Store itself — avoids the chicken-and-egg
   problem of needing Secrets Store access to bootstrap Secrets Store access.
 
-## Explicitly not in scope yet
+### Checkpoint 3 — the full vendor checklist
 
-- The full vendor field set from `02 - Launch Checklist` (Oracle, GitHub, Netlify, Claude/Gemini/
-  Grok, Twenty CRM, n8n, Google Drive, backup storage, domain/DNS) — checkpoint 3.
-- Any CLI-auth vendor path — per the brief, those don't go through this web form at all. The
-  realistic flow is Jonathan running `gh auth login` / `netlify login` / `oci setup config` /
-  `wrangler login` in a terminal (likely in a live Claude Code session), with Claude Code handling
-  the follow-up key generation and the eventual Secrets Store write from there. This form only
-  covers vendors with no CLI-auth option. Checkpoint 3 needs to decide, vendor by vendor, which
-  path each one takes — not decided yet.
+- `src/vendors.ts` now lists every credential from `02 - Launch Checklist` (domain/DNS and R2
+  backup storage excluded — neither is a secret to collect; R2 is already live per the checklist,
+  and domain/DNS is a Cloudflare DNS config step, not an API key). Each vendor is tagged
+  `authMode: 'cli' | 'manual'`.
+- **CLI-auth vendors** (GitHub `gh auth login`, Netlify `netlify login`, Oracle `oci setup config`,
+  Google Cloud `gcloud auth application-default login`) don't submit a secret through this form at
+  all — per the brief, that credential material gets generated and written to Secrets Store
+  separately, by you (likely with Claude Code driving a terminal session). This form's job for
+  those rows is just a "mark connected" checkbox, tracked in a new Cloudflare KV namespace
+  (`STATUS`) I provisioned directly during this build — a real, non-placeholder resource, since KV
+  is one of the few things the tools in this session could actually create.
+- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Documenso, n8n)
+  work exactly like checkpoint 2, generalized to handle vendors needing more than one field (n8n
+  needs both an instance URL and an API key).
+- **Three rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, and Gemini/AI Studio.
+  I could not verify from here whether Oracle's `oci setup config` is genuinely a one-click flow
+  like the other three, whether `gcloud auth application-default login` alone is sufficient for
+  Drive API access or just a first step, or whether the Gemini API key issuance might actually
+  route through that same Google Cloud CLI login rather than needing its own manual paste. See the
+  `uncertain` fields and their comments in `src/vendors.ts` for specifics — worth checking against
+  reality during the checkpoint-3 walkthrough rather than assuming the guess is right.
+
+## Explicitly not in scope
+
 - Piece 2 (the rest of the Command Center — pipeline visibility, system health) — lower priority,
   grows incrementally after the wizard ships; not started.
 
 ## Once deployed
 
-Tell me the Worker's URL once you've completed `DEPLOY.md` for both checkpoints — including
-whether the Secrets Store write worked as-is or needed the one-line fix noted above. Checkpoint 3
-starts from there.
+Tell me the Worker's URL once you've been through `DEPLOY.md` end to end — including which of the
+three unconfirmed CLI rows turned out to be right, and whether the Secrets Store write needed the
+one-line fix noted in checkpoint 2. From there this piece is done; Piece 3 (the KB demo generator,
+`kb-source/` + `src/kb/` at the repo root) is next in priority order.

@@ -17,10 +17,9 @@ and grows incrementally after Piece 1 ships; not started.
 
 ## Piece 3: KB-powered demo generator
 
-## Status: Checkpoint 3 — fallback cascade
+## Status: Checkpoint 4 — Unified KB assembly
 
-Checkpoints 1-3 are done; checkpoint 4 (Unified KB assembly — combining a `CompanyProfile` with
-the matching niche KB) is next.
+Checkpoints 1-4 are done; checkpoint 5 (first full demo, end to end) is next.
 
 **Checkpoint 1 — KB parsing/template system:**
 - `src/kb/atlasParser.ts` parses `kb-source/niche-atlas.md` (the master breadth map) into
@@ -61,8 +60,27 @@ three together in priority order):
   manual), falling through to the next step that has input if an earlier one fails rather than
   giving up immediately, and reports every attempted step's failure reason if all of them fail.
 
-`npm test` runs all three checkpoints against real content (`kb-source/`) and mocked HTTP
-responses — 44 tests, all passing.
+**Checkpoint 4 — Unified KB assembly** ("combine whatever the cascade produces with the matching
+niche KB to populate the Company Profile" → "a Unified KB powering three simultaneous surfaces"):
+- `src/unifiedKb/` generates the actual KB via Claude (`claude-opus-5`), since only Law Firms has
+  a full base-layer KB pre-written — every other vertical needs one generated on demand, which is
+  the same job the `airlock-vertical-kb` skill does, made callable from code. Two prompt-caching
+  breakpoints (static template/compliance/dialect layers + gold-standard exemplar, then the
+  vertical-specific atlas entry) keep company-specific facts out of the cached prefix, per the
+  brief's "prompt caching is required, not optional" instruction.
+- **Reuses checkpoint 1's `parseKbDoc`/`validateKbDoc`** to check the generated KB actually has
+  all 15 required sections before accepting it — a generated KB missing §5 or §9 is rejected
+  outright rather than handed back, since "the API returned 200" isn't the same as "the KB is
+  valid" for compliance-sensitive content.
+- The fixed bilingual AI-demo disclaimer is injected as a separate structured field, not asked of
+  the model — per the brief's standing policy that this is assembled, not per-niche content.
+- **Not verified against the live Claude API** — no Anthropic API key is usable from this
+  environment (this session's own Claude access isn't exposed as a key to code it runs). Tested
+  against a mocked client, including the real `law-firms.md` content as the "successful
+  generation" fixture. Full caveat and what's worth checking once a key exists: `src/unifiedKb/README.md`.
+
+`npm test` runs all four checkpoints against real content (`kb-source/`) and mocked HTTP/API
+responses — 59 tests, all passing.
 
 Run it:
 
@@ -105,6 +123,8 @@ niches when someone next looks at this repo.
 
 ## Next checkpoint
 
-Per the staged build-out: Unified KB assembly (checkpoint 4 — combining whatever the cascade
-produced with the matching niche KB into the Company Profile) is next, then a first end-to-end
-demo (checkpoint 5, all three surfaces rendering from one Unified KB).
+Per the staged build-out: checkpoint 5 — a first full demo generated end to end, with all three
+surfaces (AI Voice Receptionist, Chatbot preview, Website preview) rendering from one Unified KB.
+The brief notes the AI Receptionist can likely reuse patterns from the existing Cloudflare
+Workers/Durable Objects setup that powers the live product's demo path — worth checking that
+before building a new one from scratch.

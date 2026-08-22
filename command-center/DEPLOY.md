@@ -1,10 +1,14 @@
-# Deploying checkpoint 1 — the auth gate
+# Deploying checkpoints 1 & 2 — auth gate, then the test-credential form
 
 This session has no way to deploy a Worker, configure Cloudflare Access, or write to Secrets
 Store — there's no `wrangler` CLI here, no API token, and the MCP tools available only *read*
 Cloudflare account state (D1/KV/R2/Workers listing), not write to Workers/Access/Secrets Store.
-So this checkpoint is code-complete but **not deployed or verified** — that's on you, from your
-machine, using the CLI-auth pattern the brief asked for (one browser click, no pasted keys).
+So both checkpoints below are code-complete but **not deployed or verified** — that's on you,
+from your machine, using the CLI-auth pattern the brief asked for (one browser click, no pasted
+keys), all in the one session you said you'd do this in.
+
+**Do checkpoint 1 (steps 1-5) fully before checkpoint 2 (steps 6+)** — the form in checkpoint 2
+sits behind the same Access gate, so there's nothing to test it against until Access is live.
 
 ## 1. Install and authenticate
 
@@ -88,5 +92,53 @@ npx wrangler deploy
 - Try hitting the Worker's URL with `curl` (no Access session) → expect a 403 from Access itself,
   not a 500 from the Worker.
 
-Once that's confirmed, tell me it's live (the URL is enough) and checkpoint 2 — the credential
-intake form + Secrets Store writes — picks up from here.
+## 6. Create the Secrets Store (if it doesn't already exist)
+
+```
+npx wrangler secrets-store store create default --remote
+```
+
+Save the printed store ID.
+
+## 7. Give the Worker its own bootstrap API token
+
+This is the one credential that has to be pasted rather than CLI-authed — it's the credential
+*this Worker* uses to write every other credential into Secrets Store, so it can't live in
+Secrets Store itself.
+
+1. Cloudflare dashboard → profile icon → **API Tokens** → **Create Token** → custom token with
+   **Account → Secrets Store → Edit** permission, scoped to this account.
+2. `cd command-center && npx wrangler secret put CF_API_TOKEN` and paste it when prompted (this
+   goes into the Worker's encrypted secret storage, not `wrangler.toml`, and never touches your
+   shell history).
+
+## 8. Wire in the account/store IDs and redeploy
+
+Edit `wrangler.toml`:
+
+```toml
+CF_ACCOUNT_ID = "<your Cloudflare account ID, from the dashboard URL or `wrangler whoami`>"
+CF_SECRETS_STORE_ID = "<the store ID from step 6>"
+```
+
+```
+npx wrangler deploy
+```
+
+## 9. Verify checkpoint 2 — this is where the unverified API guess gets tested
+
+Visit the Worker's URL (through Access, as an `@orbitaiautomation.com` user) and submit a test
+value for **Plunk** or **Documenso** — a throwaway string is fine, this is just proving the write
+path, not onboarding a real key yet.
+
+- **If it redirects back with a green "Saved ... to Secrets Store" banner and a secret ID**: the
+  inferred API shape in `src/secretsStore.ts` was right. Confirm in the dashboard
+  (**Secrets Store** → your store) that the secret actually appears, scoped to `workers`.
+- **If it redirects back with a red error banner**: that's the raw Cloudflare API error message,
+  not a swallowed generic failure — read `src/secretsStore.ts`'s header comment and fix the
+  request shape there (most likely: the body needs to be a single object instead of a one-element
+  array, or vice versa). Tell me what the error said and I'll fix it from here.
+
+Once both checkpoints are verified, tell me the Worker's URL and that the two test secrets landed
+correctly — checkpoint 3 (the full vendor field set, including which vendors get the CLI-auth
+path instead of a paste form) picks up from there.

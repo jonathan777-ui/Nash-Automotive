@@ -8,6 +8,14 @@ compatibility_date = "2026-08-22"
 # every request. Deploying with the placeholder values below will make the
 # Worker refuse every request (fails closed, per the placeholder discipline
 # this project uses everywhere else) rather than silently run unauthenticated.
+#
+# CF_ACCOUNT_ID / CF_SECRETS_STORE_ID: also not secrets, filled in during checkpoint 2 —
+# see DEPLOY.md. CF_API_TOKEN is NOT here on purpose: it's the credential this Worker uses
+# to write *other* credentials into Secrets Store, so it must be a plain Wrangler secret
+# (`wrangler secret put CF_API_TOKEN`), never sitting in Secrets Store itself or in this
+# plaintext config file.
 [vars]
 TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
 POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
+CF_ACCOUNT_ID = "PLACEHOLDER_CLOUDFLARE_ACCOUNT_ID"
+CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"

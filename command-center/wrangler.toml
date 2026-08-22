@@ -1,0 +1,13 @@
+name = "orbit-command-center"
+main = "src/index.ts"
+compatibility_date = "2026-08-22"
+
+# Both of these are filled in AFTER you create the Cloudflare Access application
+# that gates this Worker — see DEPLOY.md step 3. Neither is a secret; they're
+# public identifiers Access itself uses to validate the JWT it attaches to
+# every request. Deploying with the placeholder values below will make the
+# Worker refuse every request (fails closed, per the placeholder discipline
+# this project uses everywhere else) rather than silently run unauthenticated.
+[vars]
+TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
+POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"

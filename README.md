@@ -1,11 +1,21 @@
-# Airlock KB-Powered Demo Generator
+# Orbit AI — Lead-to-Onboarding Pipeline (this repo)
 
-Scope: the KB-powered demo generator for Orbit AI's lead-to-onboarding pipeline. A prospect's
-Google Business Profile (or a scraped website, or a manual City/State/niche form) gets combined
-with the matching niche KB to produce a Unified KB that powers three demo surfaces at once — AI
-Voice Receptionist, Chatbot preview, Website preview. See `kb-source/` for the source material and
-the project brief for full pipeline context (this generator is one piece of a larger system; the
-CRM, dialer, calendar, and Telnyx/Stripe activation are out of scope here).
+This repo holds two independently-deployable pieces of Orbit AI's lead-to-onboarding system, per
+the project brief's build order:
+
+- **`command-center/`** — Piece 1 (build first): the persistent Operations Command Center,
+  starting with a Cloudflare-Access-gated credential wizard. Nothing downstream can proceed
+  without credentials being gathered somewhere, so this comes before everything else. See
+  `command-center/README.md`.
+- **`kb-source/` + `src/kb/`** (this file, below) — Piece 3: the KB-powered demo generator. A
+  prospect's Google Business Profile (or a scraped website, or a manual City/State/niche form)
+  gets combined with the matching niche KB to produce a Unified KB that powers three demo surfaces
+  at once — AI Voice Receptionist, Chatbot preview, Website preview.
+
+Piece 2 (the rest of the Command Center — pipeline visibility, system health) is lower priority
+and grows incrementally after Piece 1 ships; not started.
+
+## Piece 3: KB-powered demo generator
 
 ## Status: Checkpoint 1 — KB parsing/template system
 

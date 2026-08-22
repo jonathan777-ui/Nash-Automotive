@@ -17,19 +17,34 @@ and grows incrementally after Piece 1 ships; not started.
 
 ## Piece 3: KB-powered demo generator
 
-## Status: Checkpoint 1 — KB parsing/template system
+## Status: Checkpoint 2 — GBP ingestion
 
-Working, tested, and checked in before moving to checkpoint 2 (GBP ingestion), per the staged
-build-out this project asked for.
+Checkpoint 1 (KB parsing) and checkpoint 2 (GBP ingestion) are both done; checkpoint 3 (the
+website-scrape + manual-form fallback cascade) is next.
 
+**Checkpoint 1 — KB parsing/template system:**
 - `src/kb/atlasParser.ts` parses `kb-source/niche-atlas.md` (the master breadth map) into
   structured verticals + niches.
 - `src/kb/kbDocParser.ts` parses a full generated KB document (a vertical base layer, or a
   finished single-business KB) into its mandatory `kb-template.md` §0–14 sections, and validates
   that the two non-negotiable sections (§5 Compliance, §9 Data schema) are present.
 - `npm run kb:summary` prints a parsed summary of the atlas and both worked examples.
-- `npm test` runs the parser against the real content in `kb-source/` (not fixtures) — 13 tests,
-  all passing.
+
+**Checkpoint 2 — GBP ingestion** (input cascade step 1: "Google Business Profile link → pull
+hours, services, etc. directly"):
+- `src/gbp/` resolves a Google Business Profile / Maps URL (including `maps.app.goo.gl` short
+  links) into a `CompanyProfile` (`src/company/types.ts`) via Google's Places API (New) — not by
+  scraping Maps directly, to avoid duplicating the anti-ban extraction work already scoped
+  separately to `04 - Scraper Deployment Scaffold`. See `src/gbp/README.md` for why it falls back
+  to a Text Search rather than assuming every Maps URL carries a usable Places `place_id` (most
+  don't — a Maps URL's embedded feature ID is a different identifier entirely).
+- **Not verified against the live Places API** — there's no Google API key in this environment
+  yet. Tested against mocked HTTP responses only (13 tests, all passing); a real smoke test is
+  needed once a Places API key exists via the Command Center rollout. Full caveat in
+  `src/gbp/README.md`.
+
+`npm test` runs both checkpoints' parsers against real content (`kb-source/`) and mocked GBP
+responses — 26 tests, all passing.
 
 Run it:
 
@@ -72,6 +87,7 @@ niches when someone next looks at this repo.
 
 ## Next checkpoint
 
-Per the staged build-out: GBP ingestion (pull hours/services from a real Google Business Profile
-link) is next, followed by the website-scrape and manual-form fallback cascade, then Unified KB
-assembly, then a first end-to-end demo.
+Per the staged build-out: the website-scrape + manual-form fallback cascade (checkpoint 3) is
+next, followed by Unified KB assembly (checkpoint 4), then a first end-to-end demo (checkpoint 5).
+The website-scrape step should coordinate with (not duplicate) the scraper being built per
+`04 - Scraper Deployment Scaffold` / `SCRAPER_SPEC.md`.

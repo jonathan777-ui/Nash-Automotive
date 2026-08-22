@@ -50,11 +50,15 @@ export const VENDORS: VendorDef[] = [
   },
   {
     id: 'google-cloud',
-    label: 'Google Cloud (Drive API)',
+    label: 'Google Cloud (Drive API + Places API)',
     authMode: 'cli',
     cliCommand: 'gcloud auth application-default login',
-    hint: 'Enables the Drive API for per-client folder auto-creation.',
-    uncertain: true, // confirmed gcloud itself has real CLI OAuth login; NOT confirmed that this alone is sufficient — enabling the Drive API and minting OAuth client credentials or a service account key is a separate follow-up step Claude Code would still need to script.
+    hint:
+      'Drive API for per-client folder auto-creation, and Places API (New) for the demo generator’s ' +
+      'GBP-link ingestion (src/gbp/ at the repo root) — both need enabling on the same project, plus ' +
+      'an API key minted for Places specifically (`gcloud services enable places-backend.googleapis.com` ' +
+      'then `gcloud services api-keys create`, restricted to the Places API).',
+    uncertain: true, // confirmed gcloud itself has real CLI OAuth login; NOT confirmed that this alone is sufficient — enabling both APIs and minting the right credentials (OAuth client/service account for Drive, a restricted API key for Places) is follow-up scripting Claude Code would still need to do, not something the login step alone produces.
   },
 
   // --- Manual-paste fallback: no CLI-auth path found for these ---

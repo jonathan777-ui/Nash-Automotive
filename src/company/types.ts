@@ -30,6 +30,9 @@ export interface CompanyProfile {
     source: 'gbp' | 'website-scrape' | 'manual-form';
     sourceUrl?: string;
     fetchedAt: string; // ISO 8601
+    /** Free-text background (a site's meta description, etc.) — extra context for Enrichment
+     * (checkpoint 4) beyond the structured fields above. Not populated by every source. */
+    description?: string;
   };
   services: {
     /** Human-readable per-day hours, good enough to read straight into a receptionist script. */

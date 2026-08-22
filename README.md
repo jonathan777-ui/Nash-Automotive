@@ -17,10 +17,10 @@ and grows incrementally after Piece 1 ships; not started.
 
 ## Piece 3: KB-powered demo generator
 
-## Status: Checkpoint 2 — GBP ingestion
+## Status: Checkpoint 3 — fallback cascade
 
-Checkpoint 1 (KB parsing) and checkpoint 2 (GBP ingestion) are both done; checkpoint 3 (the
-website-scrape + manual-form fallback cascade) is next.
+Checkpoints 1-3 are done; checkpoint 4 (Unified KB assembly — combining a `CompanyProfile` with
+the matching niche KB) is next.
 
 **Checkpoint 1 — KB parsing/template system:**
 - `src/kb/atlasParser.ts` parses `kb-source/niche-atlas.md` (the master breadth map) into
@@ -39,12 +39,30 @@ hours, services, etc. directly"):
   to a Text Search rather than assuming every Maps URL carries a usable Places `place_id` (most
   don't — a Maps URL's embedded feature ID is a different identifier entirely).
 - **Not verified against the live Places API** — there's no Google API key in this environment
-  yet. Tested against mocked HTTP responses only (13 tests, all passing); a real smoke test is
-  needed once a Places API key exists via the Command Center rollout. Full caveat in
-  `src/gbp/README.md`.
+  yet. Tested against mocked HTTP responses only; a real smoke test is needed once a Places API
+  key exists via the Command Center rollout. Full caveat in `src/gbp/README.md`.
 
-`npm test` runs both checkpoints' parsers against real content (`kb-source/`) and mocked GBP
-responses — 26 tests, all passing.
+**Checkpoint 3 — fallback cascade** (input cascade steps 2 and 3, plus the orchestrator tying all
+three together in priority order):
+- `src/webscrape/` fetches a single already-known business website (only reached when there's no
+  GBP link) and extracts name/phone/address/hours — preferring schema.org JSON-LD when a site has
+  it (common on Wix/Squarespace/WordPress business sites), falling back to `<title>`/meta tags and
+  a plain-text phone-number scan otherwise. Deliberately not the anti-ban bulk scraper from
+  `04 - Scraper Deployment Scaffold` — that one discovers *new* leads at volume across Maps/
+  Chamber/Facebook/Instagram; this is a one-off fetch of a single URL already in hand, so there's
+  no rate-limit/anti-ban concern to duplicate.
+- `src/manualForm/` validates a `{companyName, city, state, vertical, niche}` submission against
+  the real parsed atlas (rejecting a vertical/niche that doesn't actually exist, per "niche
+  selection from the KB's niche list"). **Flag:** the brief's own field list for this step is just
+  "City, State, niche selection" — no company name. That can't be right for a Company Profile, so
+  `companyName` was added rather than inventing a placeholder name; worth confirming whether that
+  was an oversight in the brief.
+- `src/cascade/resolveCompanyProfile.ts` runs all three steps in priority order (GBP → website →
+  manual), falling through to the next step that has input if an earlier one fails rather than
+  giving up immediately, and reports every attempted step's failure reason if all of them fail.
+
+`npm test` runs all three checkpoints against real content (`kb-source/`) and mocked HTTP
+responses — 44 tests, all passing.
 
 Run it:
 
@@ -87,7 +105,6 @@ niches when someone next looks at this repo.
 
 ## Next checkpoint
 
-Per the staged build-out: the website-scrape + manual-form fallback cascade (checkpoint 3) is
-next, followed by Unified KB assembly (checkpoint 4), then a first end-to-end demo (checkpoint 5).
-The website-scrape step should coordinate with (not duplicate) the scraper being built per
-`04 - Scraper Deployment Scaffold` / `SCRAPER_SPEC.md`.
+Per the staged build-out: Unified KB assembly (checkpoint 4 — combining whatever the cascade
+produced with the matching niche KB into the Company Profile) is next, then a first end-to-end
+demo (checkpoint 5, all three surfaces rendering from one Unified KB).

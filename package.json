@@ -1,0 +1,18 @@
+{
+  "name": "airlock-demo-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KB-powered demo generator for Orbit AI's Airlock platform (lead-to-onboarding pipeline).",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "kb:summary": "tsx scripts/kb-summary.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

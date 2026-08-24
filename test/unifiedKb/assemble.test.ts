@@ -4,6 +4,7 @@ import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { parseNicheAtlas } from '../../src/kb/atlasParser.js';
 import { assembleUnifiedKb } from '../../src/unifiedKb/assemble.js';
+import { loadKbGrounding } from '../../src/unifiedKb/kbLibrary.js';
 import type { AnthropicMessagesClient } from '../../src/unifiedKb/generateKb.js';
 import type { StaticKbContext } from '../../src/unifiedKb/promptBuilder.js';
 import type { CompanyProfile } from '../../src/company/types.js';
@@ -55,6 +56,25 @@ describe('assembleUnifiedKb', () => {
     expect(result.unifiedKb.disclaimer.en).toContain('Track Dog Racing');
     expect(result.unifiedKb.disclaimer.es).toContain('Track Dog Racing');
     expect(result.unifiedKb.rawMarkdown).toBe(validKbMarkdown.trim());
+  });
+
+  it('threads real base-layer + overlay grounding from kbLibrary through into the API request', async () => {
+    const automotive = atlas.verticals.find((v) => v.name === 'Automotive')!;
+    const grounding = loadKbGrounding(kbSourceDir, 'Automotive', 'Auto repair / mechanic');
+    const client = fakeClient(validKbMarkdown);
+
+    const result = await assembleUnifiedKb(profile, automotive, 'Auto repair / mechanic', {
+      apiKey: 'x',
+      staticContext,
+      client,
+      grounding,
+    });
+
+    expect(result.ok).toBe(true);
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const systemText = call.system.map((block: { text: string }) => block.text).join('\n');
+    expect(systemText).toContain('authoritative source');
+    expect(systemText).toContain('## A. Voice tuning');
   });
 
   it('propagates a generation failure without producing a partial UnifiedKb', async () => {

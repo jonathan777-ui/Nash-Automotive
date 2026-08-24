@@ -3,6 +3,7 @@ import { buildSystemBlocks, buildUserMessage, type StaticKbContext } from './pro
 import { parseKbDoc, validateKbDoc } from '../kb/kbDocParser.js';
 import type { CompanyProfile } from '../company/types.js';
 import type { KbDoc } from '../kb/types.js';
+import type { KbGrounding } from './kbLibrary.js';
 
 export interface GenerateKbSuccess {
   ok: true;
@@ -27,6 +28,11 @@ export interface AnthropicMessagesClient {
 export interface GenerateKbDeps {
   apiKey: string;
   staticContext: StaticKbContext;
+  /** Pre-written base layer / niche overlay for this vertical+niche, from kbLibrary.ts's
+   * loadKbGrounding — precomputed by the caller the same way staticContext is, rather than read
+   * from disk here, so generateKb stays pure aside from the API call itself. Omit (or pass {}) for
+   * a vertical with no pre-written content; buildSystemBlocks falls back to atlas-only generation. */
+  grounding?: KbGrounding;
   /** Injectable for tests; defaults to a real Anthropic client built from apiKey. */
   client?: AnthropicMessagesClient;
 }
@@ -49,7 +55,7 @@ export async function generateKb(
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'high' },
-      system: buildSystemBlocks(deps.staticContext, verticalText),
+      system: buildSystemBlocks(deps.staticContext, verticalText, deps.grounding),
       messages: [{ role: 'user', content: buildUserMessage(profile, niche) }],
     });
   } catch (err) {

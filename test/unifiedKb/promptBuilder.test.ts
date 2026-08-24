@@ -35,6 +35,43 @@ describe('buildSystemBlocks', () => {
   });
 });
 
+describe('buildSystemBlocks with grounding', () => {
+  it('uses the pre-written base layer as the primary vertical-specific content when one is supplied', () => {
+    const blocks = buildSystemBlocks(staticContext, 'VERTICAL TEXT HERE', {
+      verticalBase: 'BASE LAYER CONTENT',
+    });
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].text).toContain('BASE LAYER CONTENT');
+    expect(blocks[1].text).toContain('VERTICAL TEXT HERE');
+    expect(blocks[1].text.toLowerCase()).toContain('authoritative source');
+  });
+
+  it('layers a niche overlay on top of the base layer when both are supplied', () => {
+    const blocks = buildSystemBlocks(staticContext, 'VERTICAL TEXT HERE', {
+      verticalBase: 'BASE LAYER CONTENT',
+      nicheOverlay: 'OVERLAY CONTENT',
+    });
+    expect(blocks[1].text).toContain('BASE LAYER CONTENT');
+    expect(blocks[1].text).toContain('OVERLAY CONTENT');
+    expect(blocks[1].text.toLowerCase()).toContain('only tighten compliance');
+    expect(blocks[1].text.indexOf('BASE LAYER CONTENT')).toBeLessThan(blocks[1].text.indexOf('OVERLAY CONTENT'));
+  });
+
+  it('falls back to atlas-only generation when no grounding is supplied', () => {
+    const withEmptyGrounding = buildSystemBlocks(staticContext, 'VERTICAL TEXT HERE', {});
+    const withNoArg = buildSystemBlocks(staticContext, 'VERTICAL TEXT HERE');
+    expect(withEmptyGrounding[1].text).toBe(withNoArg[1].text);
+    expect(withNoArg[1].text.toLowerCase()).toContain('no pre-written base layer exists yet');
+  });
+
+  it('still marks both blocks cacheable when grounding is present', () => {
+    const blocks = buildSystemBlocks(staticContext, 'VERTICAL TEXT HERE', { verticalBase: 'BASE LAYER CONTENT' });
+    for (const block of blocks) {
+      expect(block.cache_control).toEqual({ type: 'ephemeral' });
+    }
+  });
+});
+
 describe('buildUserMessage', () => {
   it('includes the company facts and the target niche', () => {
     const message = buildUserMessage(profile, 'Performance/Tuning');

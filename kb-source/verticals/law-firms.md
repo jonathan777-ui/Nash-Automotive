@@ -196,21 +196,21 @@ Maps cleanly to Airlock CRM objects (lead/contact + matter + activity):
 
 ```
 contact.full_name
-contact.phone_primary (E.164, verified)
-contact.preferred_language (en | es | other)
-contact.spanish_variety (mx | mx-us | caribbean | central-am | andean | rioplatense | es | n/a)
-contact.source (referral | google | web | social | walk-in)
-matter.practice_area (pi | immigration | family | criminal | workers-comp | estate | business | re | bankruptcy | employment)
-matter.summary (1–2 sentences, no advice)
+contact.phone_primary           (E.164, verified)
+contact.preferred_language      (en | es | other)
+contact.spanish_variety         (mx | mx-us | caribbean | central-am | andean | rioplatense | es | n/a)
+contact.source                  (referral | google | web | social | walk-in)
+matter.practice_area            (pi | immigration | family | criminal | workers-comp | estate | business | re | bankruptcy | employment)
+matter.summary                  (1–2 sentences, no advice)
 matter.incident_date
 matter.jurisdiction
-matter.parties[] (names for conflict check)
-matter.deadline_or_hearing (date | none)
-matter.urgency (routine | priority | URGENT)
-intake.consult_booked (datetime | none)
-intake.consult_type (free | paid) (in-person | phone | video)
-intake.attorney_language (en | bilingual)
-intake.disposition (booked | callback | referred-out | not-qualified | emergency)
+matter.parties[]                (names for conflict check)
+matter.deadline_or_hearing      (date | none)
+matter.urgency                  (routine | priority | URGENT)
+intake.consult_booked           (datetime | none)
+intake.consult_type             (free | paid) (in-person | phone | video)
+intake.attorney_language         (en | bilingual)
+intake.disposition              (booked | callback | referred-out | not-qualified | emergency)
 intake.notes
 ```
 
@@ -291,4 +291,4 @@ Each overlay specifies: voice tuning, niche FAQs, niche intake fields, what-to-b
 
 ---
 
-*End of Law Firms base layer. Practice-area overlays attach here.*  
+*End of Law Firms base layer. Practice-area overlays attach here.*

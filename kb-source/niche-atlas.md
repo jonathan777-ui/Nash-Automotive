@@ -11,7 +11,7 @@ are accurate, not generic. Niche lists are the high-value core and are extensibl
 
 ---
 
-## 1. Law Firms *(gold-standard worked example: `verticals/law-firms.md`)*
+## 1. Law Firms  *(gold-standard worked example: `verticals/law-firms.md`)*
 **Positioning:** premier, discreet, white-glove. **Register:** `usted` default; trauma-aware.
 **Compliance:** no legal advice, no fee/outcome promises, conflict screening, privilege, emergencies (arrest, ICE detention, active DV, imminent deadline).
 **Niches:** Personal Injury · Immigration · Family/DV · Criminal Defense · Workers' Comp · Estate & Probate · Business · Real Estate · Bankruptcy · Employment. (Distinctives in the law base, §14.)
@@ -155,7 +155,7 @@ are accurate, not generic. Niche lists are the high-value core and are extensibl
 
 ---
 
-## 12. Home Services *(the big tree — high call volume, heaviest bilingual demand)*
+## 12. Home Services  *(the big tree — high call volume, heaviest bilingual demand)*
 **Positioning:** dependable, fast, "we'll take care of it today." **Register:** warm, plain; very heavy Mexican/Central-American customer + workforce base; Spanglish common.
 **Compliance:** **safety hazards** (gas smell, sparking/burning, CO, flood, no heat in freeze) → safety guidance + emergency dispatch; for gas/CO leave + 911/utility. No binding quotes/diagnoses over phone — frame the estimate/visit.
 **Niches:**
@@ -187,7 +187,7 @@ are accurate, not generic. Niche lists are the high-value core and are extensibl
 
 ---
 
-## 14. Solar & Home Energy *(consultative high-ticket sales)*
+## 14. Solar & Home Energy  *(consultative high-ticket sales)*
 **Positioning:** consultative, savings-focused, no high pressure. **Register:** friendly-professional; bilingual heavy.
 **Compliance:** no savings/ROI/tax-credit guarantees; capture interest, book design/consult.
 **Niches:**
@@ -283,4 +283,4 @@ are accurate, not generic. Niche lists are the high-value core and are extensibl
 
 *Atlas covers the 20 verticals. Expand any niche into a full Law-base-depth KB via the
 generator. Bench verticals (Funeral & Memorial, Moving & Storage, Education/Childcare,
-Logistics & Trucking) attach the same way.*  
+Logistics & Trucking) attach the same way.*

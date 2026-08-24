@@ -90,4 +90,19 @@ describe('generateKb', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain('network down');
   });
+
+  it('passes grounding through into the actual API request when supplied', async () => {
+    const client = fakeClient({ content: [{ type: 'text', text: validKbMarkdown }], stop_reason: 'end_turn' });
+    await generateKb(profile, 'VERTICAL TEXT', 'Auto repair / mechanic', {
+      apiKey: 'x',
+      staticContext,
+      client,
+      grounding: { verticalBase: 'BASE LAYER CONTENT', nicheOverlay: 'OVERLAY CONTENT' },
+    });
+
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const systemText = call.system.map((block: { text: string }) => block.text).join('\n');
+    expect(systemText).toContain('BASE LAYER CONTENT');
+    expect(systemText).toContain('OVERLAY CONTENT');
+  });
 });

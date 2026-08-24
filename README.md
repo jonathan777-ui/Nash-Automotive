@@ -62,12 +62,20 @@ three together in priority order):
 
 **Checkpoint 4 — Unified KB assembly** ("combine whatever the cascade produces with the matching
 niche KB to populate the Company Profile" → "a Unified KB powering three simultaneous surfaces"):
-- `src/unifiedKb/` generates the actual KB via Claude (`claude-opus-5`), since only Law Firms has
-  a full base-layer KB pre-written — every other vertical needs one generated on demand, which is
-  the same job the `airlock-vertical-kb` skill does, made callable from code. Two prompt-caching
-  breakpoints (static template/compliance/dialect layers + gold-standard exemplar, then the
-  vertical-specific atlas entry) keep company-specific facts out of the cached prefix, per the
-  brief's "prompt caching is required, not optional" instruction.
+- `src/unifiedKb/` generates the actual single-business KB via Claude (`claude-opus-5`) — there's
+  no finished single-business KB sitting in `kb-source/` for any vertical/niche pair, so every
+  generation still calls the model. But **all 20 atlas verticals now have a pre-written base-layer
+  KB** (`kb-source/verticals/*.md`, discovered in a fuller export of the `airlock-vertical-kb`
+  skill's reference material than what initially shipped — see `src/unifiedKb/README.md` for the
+  correction), plus one flagship niche overlay per vertical so far. `src/unifiedKb/kbLibrary.ts`
+  looks up whichever of these exists for a given vertical/niche and, when found, hands it to Claude
+  as the authoritative content to adapt to the specific business — a much stronger grounding than
+  generating from the raw atlas breadth-map entry alone. Only the 4 bench verticals (no base layer
+  yet) fall back to atlas-only generation, the same job the `airlock-vertical-kb` skill does by
+  hand. Two prompt-caching breakpoints (static template/compliance/dialect layers + gold-standard
+  exemplar, then the vertical-specific content — base layer + overlay when present, else the atlas
+  entry) keep company-specific facts out of the cached prefix, per the brief's "prompt caching is
+  required, not optional" instruction.
 - **Reuses checkpoint 1's `parseKbDoc`/`validateKbDoc`** to check the generated KB actually has
   all 15 required sections before accepting it — a generated KB missing §5 or §9 is rejected
   outright rather than handed back, since "the API returned 200" isn't the same as "the KB is
@@ -80,7 +88,7 @@ niche KB to populate the Company Profile" → "a Unified KB powering three simul
   generation" fixture. Full caveat and what's worth checking once a key exists: `src/unifiedKb/README.md`.
 
 `npm test` runs all four checkpoints against real content (`kb-source/`) and mocked HTTP/API
-responses — 59 tests, all passing.
+responses — 71 tests, all passing.
 
 Run it:
 
@@ -96,10 +104,17 @@ npm run kb:summary
   niche-level intent+intake+urgency, and emergency/handoff triggers.
 - `kb-template.md`, `compliance-patterns.md`, `language-dialect-layer.md` — the shared layers every
   KB inherits (never duplicated per niche).
-- `verticals/law-firms.md` — the shared **base layer** worked example (practice-area overlays
-  stack on top of this).
+- `verticals/{vertical}.md` — a full bilingual §0–14 **base-layer** KB for each of the 20 atlas
+  verticals (e.g. `law-firms.md`, `automotive.md`, `medical-dental.md`) — niche overlays stack on
+  top of these. See `src/unifiedKb/kbLibrary.ts` for the vertical-name → filename mapping.
+- `verticals/{vertical}__{niche}.md` — a **niche overlay** for one flagship niche per vertical (20
+  of 120 named niches so far), using lettered `## A/B/C...` sections that extend the base layer
+  rather than standing alone (voice tuning, glossary/intent/intake adds, niche FAQs, authorized
+  fees, booking/urgency notes, website/chatbot copy adds). May only *tighten* compliance from the
+  base layer, never loosen it.
 - `verticals/automotive__performance-tuning__track-dog-racing.md` — a finished **single-business**
-  KB (Automotive → Performance/Tuning, for Track Dog Racing), showing the other end of the pattern.
+  KB (Automotive → Performance/Tuning, for Track Dog Racing), showing the other end of the pattern:
+  what a base layer + overlay ultimately gets adapted into for one specific company.
 
 **Non-negotiable rule enforced by this parser's validation, not just documentation:** niche
 overlays may only *tighten* compliance from the base layer, never loosen it. `validateKbDoc`

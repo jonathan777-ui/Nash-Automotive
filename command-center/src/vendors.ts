@@ -99,11 +99,19 @@ export const VENDORS: VendorDef[] = [
     hint: 'Plunk dashboard → Settings → API Keys → Secret Key.',
   },
   {
-    id: 'documenso',
-    label: 'Documenso (e-sign)',
+    id: 'stripe',
+    label: 'Stripe',
     authMode: 'manual',
-    fields: [{ key: 'key', label: 'API token', secretName: 'DOCUMENSO_API_KEY' }],
-    hint: 'Documenso → Settings → API Tokens → Create Token.',
+    fields: [
+      { key: 'publishableKey', label: 'Publishable key', secretName: 'STRIPE_PUBLISHABLE_KEY' },
+      { key: 'secretKey', label: 'Secret key', secretName: 'STRIPE_SECRET_KEY' },
+      { key: 'webhookSecret', label: 'Webhook signing secret', secretName: 'STRIPE_WEBHOOK_SECRET' },
+    ],
+    hint:
+      'dashboard.stripe.com → Developers → API keys, plus a webhook endpoint signing secret. Per the ' +
+      'brief (v2): account creation has no verification-queue blocker like Telnyx, so Phase 1 builds ' +
+      'the whole payment-link + webhook + CRM stage-advance flow now against placeholder values ' +
+      '(PLACEHOLDER_STRIPE_PUBLISHABLE_KEY etc.) — it activates the moment real keys land here.',
   },
   {
     id: 'n8n',
@@ -117,5 +125,13 @@ export const VENDORS: VendorDef[] = [
   },
 ];
 
-/** The original checkpoint-2 pair, kept as a stable export in case anything still imports it. */
-export const TEST_VENDORS: VendorDef[] = VENDORS.filter((v) => v.id === 'plunk' || v.id === 'documenso');
+/** The original checkpoint-2 pair, kept as a stable export in case anything still imports it.
+ * Was (plunk, documenso) — swapped documenso for stripe when Documenso dropped out of the Phase 1
+ * launch checklist (brief v2: "optional later upgrade, not an MVP dependency"). */
+export const TEST_VENDORS: VendorDef[] = VENDORS.filter((v) => v.id === 'plunk' || v.id === 'stripe');
+
+/** Documenso is NOT in `VENDORS` — brief v2 / `02 - Launch Checklist` v2 explicitly moved it out of
+ * the Phase 1 credential set ("Deliberately NOT in this checklist... optional upgrade later, not
+ * required for MVP e-sign"). MVP e-sign is the lightweight inline capture built directly into the
+ * portal (typed name + checkbox + timestamp + IP) - no vendor account, so nothing to gather here.
+ * Re-add a `documenso` VendorDef here if/when that upgrade path is actually pursued. */

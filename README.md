@@ -12,8 +12,16 @@ the project brief's build order:
   gets combined with the matching niche KB to produce a Unified KB that powers three demo surfaces
   at once — AI Voice Receptionist, Chatbot preview, Website preview.
 
-Piece 2 (the rest of the Command Center — pipeline visibility, system health) is lower priority
-and grows incrementally after Piece 1 ships; not started.
+Piece 2 (the rest of the Command Center — pipeline visibility, system health, internal team
+messaging) is lower priority and grows incrementally after Piece 1 ships; not started.
+
+**Brief v2 update (checked against everything already built, adjusted where affected):** Front Door
+Audit added as a real, parallel-running piece; MVP e-sign is now a lightweight inline capture, not
+Documenso; Stripe moved from deferred into Phase 1 with placeholder credentials; a new CRM
+Architecture section changed how CRM-writing workflows are structured. Piece 1 and Piece 3 (both
+below) were reviewed against v2 and updated where affected — see `command-center/README.md` and
+`workflows/README.md` for exactly what changed. Piece 3 itself (the KB demo generator) was
+unaffected — none of the v2 changes touch its scope.
 
 ## Piece 3: KB-powered demo generator
 

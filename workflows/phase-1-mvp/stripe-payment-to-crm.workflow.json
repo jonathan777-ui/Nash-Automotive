@@ -1,0 +1,162 @@
+{
+  "name": "Orbit AI - Phase 1 - Stripe payment to CRM",
+  "nodes": [
+    {
+      "id": "0e46bc1b-2590-42e9-affd-67df34b6b1ae",
+      "name": "Stripe webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-800, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stripe-payment",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "notes": "NEW (brief v2): 'built now in Phase 1 with placeholder credentials, not deferred to Phase 5. Only Telnyx stays deferred.' options.rawBody:true is REQUIRED for the signature check in the next node to work at all - Stripe signs the exact raw request bytes, and if this node re-serializes the parsed JSON body instead of preserving the raw string, every signature check will fail even with a correct webhook secret. UNVERIFIED: whether 'rawBody' is the exact option name/nesting for the installed n8n version, and which expression exposes the raw string afterward ($json.body as a raw string vs $binary.data) - this is the single most likely thing in this entire workflow library to need hand-fixing on import. If it doesn't work as written, the safer fix is architectural, not a tweak: move signature verification into a tiny dedicated serverless function (Netlify Function or Cloudflare Worker, consistent with this repo's 'standalone service, not n8n Code nodes' principle for anything non-trivial) that verifies the signature with Stripe's own SDK and forwards only verified events to this webhook."
+    },
+    {
+      "id": "28f679fa-be17-4251-bc84-49aeb6ec0da8",
+      "name": "Verify signature & classify event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 0],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.STRIPE_WEBHOOK_SECRET || 'PLACEHOLDER_STRIPE_WEBHOOK_SECRET';\nconst sigHeader = $input.first().json.headers['stripe-signature'] || '';\nconst rawBody = $input.first().json.body /* ASSUMES this is the raw string, per the rawBody option on the Stripe webhook node - not verified */;\n\nconst parts = Object.fromEntries(sigHeader.split(',').map((kv) => kv.split('=')));\nconst signedPayload = `${parts.t}.${rawBody}`;\nconst expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');\n\nlet valid = false;\ntry {\n  valid = crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(parts.v1 || '', 'hex'));\n} catch (e) {\n  valid = false; // length mismatch etc. - definitely not a valid signature\n}\n\nconst event = valid ? JSON.parse(rawBody) : null;\nconst RELEVANT_TYPES = ['checkout.session.completed', 'payment_intent.succeeded'];\n\nreturn [{\n  json: {\n    ok: valid,\n    handled: valid && RELEVANT_TYPES.includes(event?.type),\n    eventType: event?.type,\n    opportunityId: event?.data?.object?.metadata?.opportunityId,\n  },\n}];"
+      },
+      "notes": "Implements Stripe's documented signature scheme (t=timestamp,v1=hexHMAC over `${t}.${rawBody}` with the webhook secret) - the algorithm itself is stable public Stripe documentation, but this hasn't been tested against a real Stripe webhook delivery, and depends entirely on the previous node's raw-body assumption holding. ALSO ASSUMES the Checkout Session (or PaymentIntent) was created with metadata.opportunityId set to the Twenty CRM Opportunity ID, the same link-up pattern as the e-sign/Documenso workflow used for its externalId - that metadata has to be set wherever the Stripe payment link/Checkout Session actually gets created (the portal's Onboarding Form step, Netlify-hosted, not built in this repo)."
+    },
+    {
+      "id": "06641884-801d-43ee-9a78-cf0475ae6425",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-320, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ac4e08ef-e413-4686-84de-aa2a88ca3236",
+      "name": "Relevant event type?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-80, -100],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.handled }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e37bd535-ced2-4cc0-b793-3453bd08f2ee",
+      "name": "Advance CRM to Live Client",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, -160],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Live Client', paymentStatus: 'Paid', onboardingProvisioningStatus: 'Pending' }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "brief v2 / 05 Section 7 phrases this as one webhook advancing 'Contract Signed -> Onboarding -> Live Client' - ASSUMPTION FLAGGED: this workflow jumps straight to 'Live Client' on payment success rather than pausing at an intermediate 'Onboarding' stage, since the brief doesn't specify a reason to wait once payment clears. If a real intermediate step needs to happen first (e.g. W6.3's onboarding provisioning automation, documented-only/not built), reconsider staging this as Onboarding here and a *second* stage-advance once provisioning actually completes - 'onboardingProvisioningStatus: Pending' is included specifically so that later automation has something to update rather than this workflow silently claiming provisioning is done when it isn't. Same Twenty CRM REST-shape uncertainty as every other workflow here."
+    },
+    {
+      "id": "753bb0b4-3a29-49e8-80eb-c862d24197ca",
+      "name": "Respond: handled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, -160],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, handled: true }) }}"
+      }
+    },
+    {
+      "id": "e49b663c-bf08-42bc-8cff-0b7a374ad6da",
+      "name": "Respond: ignored (valid, not relevant)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [160, 40],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, handled: false }) }}"
+      },
+      "notes": "Returns 200 for a validly-signed event this workflow doesn't act on, per Stripe's own guidance - responding with an error status to an event you're just not handling causes Stripe to retry it unnecessarily."
+    },
+    {
+      "id": "6f4c3676-21b5-4712-b2b6-90758779b486",
+      "name": "Respond: invalid signature",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-80, 160],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 403,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: 'Invalid Stripe signature.' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Stripe webhook": {
+      "main": [[{ "node": "Verify signature & classify event", "type": "main", "index": 0 }]]
+    },
+    "Verify signature & classify event": {
+      "main": [[{ "node": "Signature valid?", "type": "main", "index": 0 }]]
+    },
+    "Signature valid?": {
+      "main": [
+        [{ "node": "Relevant event type?", "type": "main", "index": 0 }],
+        [{ "node": "Respond: invalid signature", "type": "main", "index": 0 }]
+      ]
+    },
+    "Relevant event type?": {
+      "main": [
+        [{ "node": "Advance CRM to Live Client", "type": "main", "index": 0 }],
+        [{ "node": "Respond: ignored (valid, not relevant)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Advance CRM to Live Client": {
+      "main": [[{ "node": "Respond: handled", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -76,7 +76,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Same Twenty CRM REST-shape uncertainty as W1.1 - and this specifically also assumes the triggering webhook payload carries the Opportunity's Twenty CRM record ID as 'opportunityId', which needs confirming against whatever actually calls this webhook (the Demo Dashboard UI/action)."
+      "notes": "Same Twenty CRM REST-shape uncertainty as W1.1 - and this specifically also assumes the triggering webhook payload carries the Opportunity's Twenty CRM record ID as 'opportunityId', which needs confirming against whatever actually calls this webhook (the Demo Dashboard UI/action). Already consistent with Section 13's Opportunity Card UX principle (status field only, no embedded demo content) - add a demoSiteUrl field here once a real hosted-demo URL exists (the 'Demo Site' status badge Section 13 describes needs a link to open in a new tab; that link doesn't exist yet since the three demo-rendering surfaces aren't built - see root README's 'Next' section)."
     },
     {
       "id": "a4f1b771-ae6f-41a2-9a77-cba7fbcb3289",

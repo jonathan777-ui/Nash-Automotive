@@ -6,7 +6,7 @@
       "name": "Lead intake webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-600, 0],
+      "position": [-800, 0],
       "webhookId": "PLACEHOLDER_WEBHOOK_ID",
       "parameters": {
         "httpMethod": "POST",
@@ -14,14 +14,14 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "notes": "Fire-and-forget: acknowledges immediately rather than waiting on Deep Dive Research + the CRM write to finish, since the caller (website form / scraper handoff / manual add) doesn't need that result synchronously."
+      "notes": "Fire-and-forget: acknowledges immediately rather than waiting on both parallel research calls plus the CRM write to finish, since the caller (website form / scraper handoff / manual add) doesn't need that result synchronously."
     },
     {
       "id": "26bdbc50-46cf-43c5-aab7-1d11931c64ee",
       "name": "Normalize lead fields",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [-360, 0],
+      "position": [-560, 0],
       "parameters": {
         "assignments": {
           "assignments": [
@@ -31,19 +31,21 @@
             { "id": "n4", "name": "email", "value": "={{ $json.body.email }}", "type": "string" },
             { "id": "n5", "name": "source", "value": "={{ $json.body.source }}", "type": "string" },
             { "id": "n6", "name": "vertical", "value": "={{ $json.body.vertical }}", "type": "string" },
-            { "id": "n7", "name": "niche", "value": "={{ $json.body.niche }}", "type": "string" }
+            { "id": "n7", "name": "niche", "value": "={{ $json.body.niche }}", "type": "string" },
+            { "id": "n8", "name": "websiteUrl", "value": "={{ $json.body.websiteUrl }}", "type": "string" },
+            { "id": "n9", "name": "opportunityId", "value": "={{ $json.body.opportunityId }}", "type": "string" }
           ]
         },
         "options": {}
       },
-      "notes": "UNCONFIRMED field shape - this assumes the lead-intake caller (website form, scraper handoff, manual add) posts these exact field names. No source in the brief specifies the lead form's actual schema; adjust to match once one exists."
+      "notes": "UNCONFIRMED field shape - assumes the lead-intake caller posts these exact field names, including websiteUrl (needed by Front Door Audit) and opportunityId (the Twenty CRM record this lead was already created as, per Section 1's 'multi-source intake ... all land in one Opportunity object' - assumes the Opportunity is created before this webhook fires, not by this workflow). No source specifies the real lead form schema yet."
     },
     {
       "id": "cb801d67-20f0-4ddc-8e74-b103de45f926",
       "name": "Deep Dive Research",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-120, 0],
+      "position": [-300, -120],
       "parameters": {
         "method": "POST",
         "url": "={{ $env.DEEP_DIVE_RESEARCH_URL || 'PLACEHOLDER_DEEP_DIVE_RESEARCH_URL' }}/research",
@@ -52,20 +54,49 @@
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {}
       },
-      "notes": "Deep Dive Research doesn't exist as a built service anywhere in this repo yet - only 'Claude: ... Deep Dive Research synthesis' is named in the brief, with no input/output contract specified. This node calls a named placeholder URL rather than guessing that contract. Per the brief's own architecture principle (demo generator = standalone service, not n8n Code nodes), this should most likely be another dedicated Node/TS service, not logic embedded in this workflow - real follow-up work once its contract is decided."
+      "notes": "Deep Dive Research doesn't exist as a built service yet - brief v2 describes it as 'business identity confirmation, web presence audit, review pattern analysis, competitor scan, opening-line recommendation - short brief, not full report,' with no request/output schema specified. This node's assumed response shape ({summary, reportUrl}, referenced downstream) is this workflow's own invention pending the real contract, not something confirmed - flagged, not silently guessed. Per the brief's architecture principle (demo generator = standalone service, not n8n Code nodes), this should most likely be another dedicated Node/TS service."
+    },
+    {
+      "id": "568c0668-4fed-4f91-8efc-63452badd52f",
+      "name": "Front Door Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-300, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FRONT_DOOR_AUDIT_URL || 'PLACEHOLDER_FRONT_DOOR_AUDIT_URL' }}/audit",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ websiteUrl: $json.websiteUrl, companyName: $json.companyName }) }}",
+        "options": {}
+      },
+      "notes": "NEW (brief v2) - 'live scored audit of the lead's actual website + AI-answer-engine readiness across 10 weighted categories (Score -> Rebuild Target -> Point Lift).' Not built anywhere in this repo: the brief names the shape of the output (a score, a rebuild target, a point lift) but not what the 10 categories actually are or how they're weighted - building the real scoring logic now would mean inventing those 10 categories, not encoding a decided set. This node's assumed response shape ({score, rebuildTarget, pointLift, reportUrl}, referenced downstream) is this workflow's own placeholder pending that design work, same flagged-not-guessed treatment as Deep Dive Research above. Runs in PARALLEL with Deep Dive Research per the Launch Checklist's explicit 'parallel Deep Dive Research + Front Door Audit' build step - both branch off the same Normalize node, not chained."
+    },
+    {
+      "id": "63c391c1-8875-473b-b875-51eb9bc092b4",
+      "name": "Merge research + audit",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [-40, 0],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "notes": "UNVERIFIED: joins the two parallel branches back into one item before the CRM write, since both results are needed together. The Merge node's parameter names/shape (mode/combineBy) have changed across n8n versions more than most core nodes - this is the single most likely node in this workflow to need hand-fixing on import. If 'combine'/'combineByPosition' isn't right on the real instance, any mode that produces one item per input pair (not multiplied/all-pairs) is the goal."
     },
     {
       "id": "6c52c009-75bd-46f0-8b1e-75573a7a5940",
       "name": "Write Opportunity to Twenty CRM (stage: Demo Queue)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [140, 0],
+      "position": [220, 0],
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities",
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Normalize lead fields').item.json.opportunityId }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ name: $('Normalize lead fields').item.json.companyName, stage: 'Demo Queue', pointOfContact: $('Normalize lead fields').item.json.contactName, enrichment: $json }) }}",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Demo Queue', dueDiligenceStatus: 'Complete', dueDiligenceReportUrl: $('Deep Dive Research').item.json.reportUrl, frontDoorAuditStatus: 'Complete', frontDoorAuditScore: $('Front Door Audit').item.json.score, frontDoorAuditReportUrl: $('Front Door Audit').item.json.reportUrl }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -74,7 +105,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "UNVERIFIED: assumes 'Demo Dashboard stage write' means setting a pipeline-stage field named 'stage' on a Twenty CRM Opportunity record via a REST endpoint shaped like POST /rest/opportunities - Twenty CRM's exact REST/GraphQL schema (field names, whether stage is a select-field option ID rather than a literal string) wasn't confirmed against real API docs from this sandbox. Confirm the real request/response shape against Jonathan's actual Twenty CRM instance before relying on this. Also see workflows/README.md's flagged assumption that 'Demo Dashboard' is a Twenty CRM pipeline view, not a separate system."
+      "notes": "Per Section 13's Opportunity Card UX principle - 'a status badge + button opening the actual tool in a new tab, no embedded tools or inline live data inside the CRM itself; it references, it doesn't host' - this writes STATUS FIELDS AND LINK-OUT URLS, not the raw research/audit content. Corrected from an earlier draft of this workflow that dumped the full Deep Dive Research response into a CRM field, which the new CRM Architecture section explicitly rules out. Same Twenty CRM REST-shape uncertainty as before (confirm field names, and whether 'stage' is a literal string or a select-field option ID, against the real instance)."
     }
   ],
   "connections": {
@@ -82,9 +113,20 @@
       "main": [[{ "node": "Normalize lead fields", "type": "main", "index": 0 }]]
     },
     "Normalize lead fields": {
-      "main": [[{ "node": "Deep Dive Research", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          { "node": "Deep Dive Research", "type": "main", "index": 0 },
+          { "node": "Front Door Audit", "type": "main", "index": 0 }
+        ]
+      ]
     },
     "Deep Dive Research": {
+      "main": [[{ "node": "Merge research + audit", "type": "main", "index": 0 }]]
+    },
+    "Front Door Audit": {
+      "main": [[{ "node": "Merge research + audit", "type": "main", "index": 1 }]]
+    },
+    "Merge research + audit": {
       "main": [[{ "node": "Write Opportunity to Twenty CRM (stage: Demo Queue)", "type": "main", "index": 0 }]]
     }
   },

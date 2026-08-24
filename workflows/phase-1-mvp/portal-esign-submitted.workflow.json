@@ -1,0 +1,119 @@
+{
+  "name": "Orbit AI - Phase 1 - Portal e-sign submitted",
+  "nodes": [
+    {
+      "id": "7b33fff8-1d82-439e-b43f-d686ee585fb2",
+      "name": "Portal e-sign webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-esign-submitted",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Replaces the old Documenso-webhook-based version of this workflow (brief v2: MVP e-sign is a lightweight inline capture on the Proposal page itself - typed name + checkbox + timestamp + IP - not a third-party e-sign vendor; Documenso is now an optional later upgrade, not an MVP dependency). ASSUMPTION: the portal (a Netlify-hosted client-facing site, not built in this repo) posts here directly rather than writing to Twenty CRM itself - consistent with the brief's 'dialer + Demo Dashboard + Deals Desk all write through n8n as a single choke point' pattern, extended to the portal for the same reason, but not explicitly stated for this specific write. responseMode is 'responseNode' (not 'onReceived' like the other Phase 1 webhooks) because the portal's own JS needs a synchronous success/fail response before it unlocks the Onboarding Form step."
+    },
+    {
+      "id": "626bb38e-4871-427a-91a0-ae63ee567358",
+      "name": "Valid signature payload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-360, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.checked }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.body.typedName }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "id": "c3",
+              "leftValue": "={{ $json.body.opportunityId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Minimal server-side defense against a malformed/tampered request - real validation (does opportunityId correspond to a real, not-already-signed Opportunity) would need a Twenty CRM read first, not built here to keep this workflow's first draft simple. IP address itself isn't validated here - it's just recorded (see the next node), trusted from the portal's request as the client's IP. If the portal sits behind a proxy/CDN (Netlify does), confirm the portal captures the real client IP (X-Forwarded-For) rather than an edge IP before this data is treated as a real audit-trail record."
+    },
+    {
+      "id": "448dc195-e25a-4c24-aa80-4a4dec9261d6",
+      "name": "Advance CRM to Contract Signed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-100, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Contract Signed', esignTypedName: $json.body.typedName, esignTimestamp: $json.body.timestampIso, esignIp: $json.body.ip }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Writes the signature's own fields (typed name, timestamp, IP) directly onto the Opportunity - unlike the research/audit content in the lead-intake workflow, this doesn't violate the Opportunity Card 'no embedded live data' principle, since a signature record IS the CRM-native fact being tracked here, not a rendering of some other tool's content. Same Twenty CRM REST-shape uncertainty as every other workflow in this library."
+    },
+    {
+      "id": "53032ba3-1f9b-4711-b70e-1038097aa47a",
+      "name": "Respond: signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [140, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      }
+    },
+    {
+      "id": "0f666b8b-00b6-4e32-a83f-0af3bbf86e23",
+      "name": "Respond: invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-100, 100],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: 'Missing or invalid signature fields (typedName, checked, opportunityId all required).' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Portal e-sign webhook": {
+      "main": [[{ "node": "Valid signature payload?", "type": "main", "index": 0 }]]
+    },
+    "Valid signature payload?": {
+      "main": [
+        [{ "node": "Advance CRM to Contract Signed", "type": "main", "index": 0 }],
+        [{ "node": "Respond: invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Advance CRM to Contract Signed": {
+      "main": [[{ "node": "Respond: signed", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

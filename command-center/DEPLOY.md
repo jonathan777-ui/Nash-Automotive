@@ -128,7 +128,7 @@ npx wrangler deploy
 ## 9. Verify checkpoint 2 — this is where the unverified API guess gets tested
 
 Visit the Worker's URL (through Access, as an `@orbitaiautomation.com` user) and submit a test
-value for **Plunk** or **Documenso** — a throwaway string is fine, this is just proving the write
+value for **Plunk** or **Stripe** — a throwaway string is fine, this is just proving the write
 path, not onboarding a real key yet.
 
 - **If it redirects back with a green "Saved ... to Secrets Store" banner and a secret ID**: the
@@ -152,9 +152,12 @@ The page now lists every vendor from `02 - Launch Checklist`, split into two sec
   Secrets Store separately, by you (or Claude Code, if you're doing this inside a live session)
   running the CLI command and then `wrangler secrets-store secret create ...` for whatever comes
   out of it.
-- **Manual paste** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Documenso, n8n): same
+- **Manual paste** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n): same
   paste-and-save flow as checkpoint 2, now for the full set. n8n has two fields (instance URL +
-  API key) — both get written before the row marks itself connected.
+  API key), Stripe has three (publishable key, secret key, webhook signing secret) — all of a
+  vendor's fields get written before the row marks itself connected. Documenso isn't in this list
+  — brief v2 moved it out of Phase 1 entirely (MVP e-sign is a lightweight inline capture built
+  into the portal, no vendor account needed).
 
 Rows marked **⚠ unconfirmed** (Oracle, Google Cloud, Gemini) are ones where I could not verify the
 CLI-auth assumption from here — see the `uncertain` comments in `src/vendors.ts` for exactly what's

@@ -30,8 +30,10 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
 
 ### Checkpoint 2 — test credential form + Secrets Store write
 
-- `src/vendors.ts` defines two manual-paste test vendors (Plunk, Documenso — neither has a known
-  CLI-auth path, so they exercise the fallback path specifically, not the CLI-auth path).
+- `src/vendors.ts` defines two manual-paste test vendors (Plunk, Stripe — neither has a known
+  CLI-auth path, so they exercise the fallback path specifically, not the CLI-auth path). Was
+  (Plunk, Documenso) originally; swapped when Documenso dropped out of the Phase 1 credential set
+  — see checkpoint 3's note below.
 - `POST /secrets` writes the submitted value into Cloudflare Secrets Store via
   `src/secretsStore.ts`.
 - **Read `src/secretsStore.ts`'s header comment before trusting it.** The request shape is a
@@ -60,9 +62,18 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   those rows is just a "mark connected" checkbox, tracked in a new Cloudflare KV namespace
   (`STATUS`) I provisioned directly during this build — a real, non-placeholder resource, since KV
   is one of the few things the tools in this session could actually create.
-- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Documenso, n8n)
-  work exactly like checkpoint 2, generalized to handle vendors needing more than one field (n8n
-  needs both an instance URL and an API key).
+- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n) work
+  exactly like checkpoint 2, generalized to handle vendors needing more than one field (n8n needs
+  both an instance URL and an API key; Stripe needs a publishable key, secret key, and webhook
+  signing secret).
+- **Documenso is deliberately not in this list.** Brief v2 / `02 - Launch Checklist` v2 moved it
+  out of Phase 1's credential set entirely — MVP e-sign is a lightweight inline capture built
+  directly into the portal (typed name + checkbox + timestamp + IP, no vendor account needed).
+  Documenso becomes an optional later upgrade, not something this wizard needs to gather yet.
+- **Stripe is in this list even though real keys don't exist yet** — per brief v2, Stripe (unlike
+  Telnyx) has no account-verification-queue blocker, so the whole payment-link + webhook + CRM
+  stage-advance flow is built now against placeholder values and activates the moment real keys
+  land here. See `workflows/phase-1-mvp/stripe-payment-to-crm.workflow.json`.
 - **Three rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, and Gemini/AI Studio.
   I could not verify from here whether Oracle's `oci setup config` is genuinely a one-click flow
   like the other three, whether `gcloud auth application-default login` alone is sufficient for
@@ -73,8 +84,12 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
 
 ## Explicitly not in scope
 
-- Piece 2 (the rest of the Command Center — pipeline visibility, system health) — lower priority,
-  grows incrementally after the wizard ships; not started.
+- Piece 2 (the rest of the Command Center — pipeline visibility/reporting, system health, and, per
+  brief v2's new `05 - Exhaustive Workflow & Automation Library` §14, **Internal Team Messaging**:
+  channel-based chat, @mentions, in-app delivery of the same alerts Section 11 sends to Slack, and
+  comment threads attached directly to CRM records) — lower priority, grows incrementally after the
+  wizard ships; not started. See `workflows/README.md`'s "Internal Team Messaging" section for the
+  full brief-v2 detail.
 
 ## Once deployed
 

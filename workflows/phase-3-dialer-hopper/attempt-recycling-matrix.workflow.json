@@ -1,0 +1,55 @@
+{
+  "name": "Orbit AI - Phase 3 - Attempt/recycling matrix (W3.3)",
+  "nodes": [
+    {
+      "id": "954e6dcc-3fe4-4bc5-b426-253f12143ca6",
+      "name": "Next-attempt webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-700, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "attempt-recycling",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Meant to be called right after post-call-synthesis.workflow.json produces a Disposition, to decide what happens to this record next. Input contract: {opportunityId, disposition, attemptCountThisWave, wave (1-4), lastAttemptDate}. ASSUMES the dialer/hopper (W3.1/W3.2, not built - schema depends on the scraper's own output) is the thing that actually tracks attemptCountThisWave and wave and passes them in here; this workflow is pure decision logic, not state storage."
+    },
+    {
+      "id": "9593b9d9-d161-45ff-be23-04b314638364",
+      "name": "Apply attempt matrix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-460, 0],
+      "parameters": {
+        "jsCode": "// Numbers are the brief's own (05 Section 4), not invented: 6 attempts on no-answer, 4 on busy,\n// 8 on gatekeeper-only, hard-stop on opt-out, 4 waves total with 90-120 day gaps between waves.\nconst MAX_ATTEMPTS = { NoAnswer: 6, Busy: 4, GatekeeperOnly: 8 };\nconst MAX_WAVES = 4;\nconst RECYCLE_MIN_DAYS = 90;\nconst RECYCLE_MAX_DAYS = 120;\n\nconst input = $input.first().json.body;\nconst { disposition, attemptCountThisWave, wave, lastAttemptDate } = input;\n\nif (disposition === 'OptOut') {\n  return [{ json: { action: 'STOP', reason: 'Opt-out is a hard stop, no further attempts ever.' } }];\n}\n\nif (disposition && disposition.startsWith('Connected-')) {\n  return [{ json: { action: 'STOP', reason: 'Connected - this workflow only recycles no-contact dispositions.' } }];\n}\n\nconst cap = MAX_ATTEMPTS[disposition];\nif (cap === undefined) {\n  return [{ json: { action: 'REVIEW', reason: `Unrecognized disposition \"${disposition}\" - not in the attempt matrix, needs a human look rather than an automated guess.` } }];\n}\n\nif (attemptCountThisWave < cap) {\n  return [{ json: { action: 'RETRY_NOW', reason: `Attempt ${attemptCountThisWave + 1} of ${cap} for this wave.` } }];\n}\n\nif (wave >= MAX_WAVES) {\n  return [{ json: { action: 'STOP', reason: `Exhausted all ${MAX_WAVES} waves - no further recycling.` } }];\n}\n\nconst nextEligibleDate = new Date(lastAttemptDate);\nnextEligibleDate.setDate(nextEligibleDate.getDate() + RECYCLE_MIN_DAYS);\nconst windowEndDate = new Date(lastAttemptDate);\nwindowEndDate.setDate(windowEndDate.getDate() + RECYCLE_MAX_DAYS);\n\nreturn [{\n  json: {\n    action: 'RECYCLE_NEXT_WAVE',\n    nextWave: wave + 1,\n    eligibleFrom: nextEligibleDate.toISOString(),\n    eligibleUntil: windowEndDate.toISOString(),\n    reason: `Wave ${wave} exhausted at ${cap} attempts - recycles into wave ${wave + 1}, eligible ${RECYCLE_MIN_DAYS}-${RECYCLE_MAX_DAYS} days out.`,\n  },\n}];"
+      },
+      "notes": "The one workflow in this library with real, brief-specified business logic encoded directly (not a placeholder) - the attempt caps and wave count are given numbers, not invented. Still not wired to anything live: nothing in this repo yet tracks attemptCountThisWave/wave/lastAttemptDate as real state (that's the hopper, W3.1/W3.2, not built), so this is correct decision logic waiting on a caller that has real state to hand it."
+    },
+    {
+      "id": "9393c9b0-4c33-447d-98ed-4c7c6e24bf20",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-220, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Next-attempt webhook": {
+      "main": [[{ "node": "Apply attempt matrix", "type": "main", "index": 0 }]]
+    },
+    "Apply attempt matrix": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "name": "Orbit AI - Phase 3 - Post-call synthesis (W3.4)",
+  "nodes": [
+    {
+      "id": "e9a2c551-4878-4c03-a4f1-9fcfc531e2d5",
+      "name": "Post-call webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-700, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "post-call-synthesis",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Fires after a dialer call ends (Preview/Power/3-Line - live call placement itself is Phase 5/Telnyx-gated, but this synthesis step is pure data processing and doesn't need a live call to exist to be built). Input contract: {opportunityId, callId, transcriptOrNotes}. Where transcriptOrNotes comes from (Telnyx call recording + transcription, or manual agent notes) isn't decided - Phase 5 scope, not this workflow's."
+    },
+    {
+      "id": "63befa07-6a0c-4209-a470-f1cc99c0925d",
+      "name": "Synthesize (Claude, structured output)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-460, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 1024, system: [{ type: 'text', text: 'You synthesize sales call transcripts into a strict 4-key summary for a CRM. Disposition must be one of: Connected-Interested, Connected-NotInterested, Connected-CallbackRequested, NoAnswer, Busy, GatekeeperOnly, WrongNumber, VoicemailLeft, OptOut. \"Try-Back Time\" is a specific ISO datetime or null if none was given. \"DM Presence\" is true only if you spoke with the actual decision-maker, not a gatekeeper.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Call transcript/notes:\\n\\n' + $json.body.transcriptOrNotes }], output_config: { format: { type: 'json_schema', schema: { type: 'object', properties: { Disposition: { type: 'string' }, Summary: { type: 'string' }, 'Try-Back Time': { type: ['string', 'null'] }, 'DM Presence': { type: 'boolean' } }, required: ['Disposition', 'Summary', 'Try-Back Time', 'DM Presence'] } } } }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Claude API"
+        }
+      },
+      "notes": "The brief gives this exact 4-key contract (Disposition/Summary/Try-Back Time/DM Presence) in 05 Section 4 - encoded directly via output_config.format's json_schema (Structured Outputs, per the claude-api skill's current guidance - NOT the deprecated output_format parameter some older examples use), so the response is guaranteed well-formed rather than parsed out of free text. cache_control on the static system instructions, per the brief's 'prompt caching is required, not optional' rule - the per-call transcript is the only thing that varies, kept out of the cached block. Model is claude-opus-5 to stay consistent with the rest of this codebase's Claude calls; worth reconsidering a lighter/faster model here given this runs on every single call rather than once per lead, which claude-opus-5 wasn't necessarily sized for. Credential referenced as 'Claude API' (n8n httpHeaderAuth, header name x-api-key) - same CLAUDE_API_KEY the Command Center writes."
+    },
+    {
+      "id": "25b75747-756d-4708-80d1-744a5d82c278",
+      "name": "Extract structured result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-220, 0],
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst textBlock = (body.content || []).find((b) => b.type === 'text');\nif (!textBlock) throw new Error('Claude response had no text content block.');\nconst parsed = JSON.parse(textBlock.text);\nreturn [{ json: parsed }];"
+      },
+      "notes": "With output_config.format set, Claude's text block IS the JSON (not prose containing JSON) - this just unwraps the SDK/API response envelope down to that object. Throws (routing to errorWorkflow) rather than silently passing through malformed data if the text block is missing."
+    },
+    {
+      "id": "cbb88109-ed32-41a3-a6e1-0b6e87b4bf64",
+      "name": "Write to Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Post-call webhook').item.json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lastCallDisposition: $json.Disposition, lastCallSummary: $json.Summary, lastCallTryBackTime: $json['Try-Back Time'], lastCallDmPresence: $json['DM Presence'] }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library."
+    },
+    {
+      "id": "7c60cc42-4ebb-4518-987b-060f9eb02d6c",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [260, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Post-call webhook": {
+      "main": [[{ "node": "Synthesize (Claude, structured output)", "type": "main", "index": 0 }]]
+    },
+    "Synthesize (Claude, structured output)": {
+      "main": [[{ "node": "Extract structured result", "type": "main", "index": 0 }]]
+    },
+    "Extract structured result": {
+      "main": [[{ "node": "Write to Opportunity", "type": "main", "index": 0 }]]
+    },
+    "Write to Opportunity": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

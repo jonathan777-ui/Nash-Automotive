@@ -98,15 +98,21 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.1 | Unified calendar write-through | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | Documented only |
 | W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | Documented only |
 | W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Stage = Live Client + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | Documented only |
-| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | Documented only |
+| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Real gap found while building it: neither Slack nor an SMS provider is in `02 - Launch Checklist` — see that folder's README. |
 | W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
-| W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | Documented only |
+| W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
 
 Not scaffolded yet: W2.1 needs the calendar's actual event schema and the System-Scheduled vs.
 Human-Scheduled tagging convention decided against a real Google Calendar setup; W2.2/W2.3 need the
 nurture/CX message *content* decided (the brief resolves the CX cadence's timing — 7/30/60/90-day
-then quarterly — but not what each touch says); W2.4's specific alert thresholds ("high-value
-lead," what counts as "overdue") aren't defined yet either.
+then quarterly — but not what each touch says).
+
+**W2.4 — scaffolded this pass.** The dispatch mechanism itself (receive an alert, route to Slack
+and/or SMS by severity) didn't need the undecided thresholds resolved first — only *what triggers*
+an alert ("high-value lead," what counts as "overdue") is still undecided, and any future workflow
+that decides those can just call the dispatcher that already exists. See
+`phase-2-calendar-nurture-alerts/README.md` for a real gap found while building it: neither Slack
+nor an SMS provider is in `02 - Launch Checklist` at all.
 
 **W2.5 (new, from CRM Architecture §13)** — "Communications Hub — custom object covering Calls/SMS/
 Social/Other, polymorphic to Person + Company + Opportunity — every touchpoint in one place
@@ -114,15 +120,14 @@ regardless of channel." Not scaffolded: this needs the Communications Hub's own 
 in Twenty CRM first (a custom object, not a standard one) before any workflow can write to it — a
 Twenty CRM configuration step, not something to guess the shape of from here.
 
-**W2.6 (new, from §5/§13)** — two-layered: role-based permission hiding (a Twenty CRM/dialer
-permissions config, not a workflow) plus "a hard action-layer block requiring logged admin override
-for exception calls" (this part *is* a workflow-shaped automation — intercept an outbound-call
-action, check the target against a DNC list, block or require a logged override). Not scaffolded:
-the DNC list's own source/schema isn't specified (a CRM field? a separate suppression list?) and
-this depends on the dialer's action layer existing, which is Phase 3/5 work.
+**W2.6 (new, from §5/§13) — the action-layer-block half scaffolded this pass.** The DNC list's
+source turned out to be identifiable after all: CRM Architecture §13's post-loss routing section
+names `restrictionReason` (DNC/Not Interested/Bad Information) as a field on the Opportunity itself
+— see `phase-2-calendar-nurture-alerts/dnc-check.workflow.json`. The role-based UI-hiding half is
+still a Twenty CRM permissions config, not a workflow, so it's not represented here.
 
-All six Phase 2 automations are real and buildable once their specifics exist — cataloged here so
-none of them are lost, not because any is hard.
+Four of six Phase 2 automations are real and buildable once their remaining specifics exist —
+cataloged here so none of them are lost, not because any is hard.
 
 ## Phase 3 — Dialer Hopper/Queue Logic (pre-Telnyx)
 
@@ -130,8 +135,8 @@ none of them are lost, not because any is hard.
 |---|---|---|---|---|
 | W3.1 | Dialer hopper request | Agent action (pull from pool / request scrape) | Auto (internal) | Documented only |
 | W3.2 | Per-user isolated queue assignment | Same as W3.1 | Auto (internal) | Documented only |
-| W3.3 | Attempt/recycling matrix | Post-call, per attempt | Auto (internal scheduling logic) | Documented only |
-| W3.4 | Post-call synthesis (strict 4-key JSON) | Call disposition event | Auto (internal — produces structured data, not an external send) | Documented only |
+| W3.3 | Attempt/recycling matrix | Post-call, per attempt | Auto (internal scheduling logic) | **Scaffolded**, with the brief's actual numbers hard-coded (not placeholders) — `phase-3-dialer-hopper/attempt-recycling-matrix.workflow.json` |
+| W3.4 | Post-call synthesis (strict 4-key JSON) | Call disposition event | Auto (internal — produces structured data, not an external send) | **Scaffolded**, using Claude Structured Outputs for the brief's exact 4-key contract — `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
 
 **Explicit correction already captured in the roadmap itself:** this phase is data/workflow layer
 only — no live call placement happens here (that's Phase 5, gated on Telnyx). Not scaffolded because
@@ -139,15 +144,16 @@ the hopper's actual data model (what a "record" looks like, how a batch is defin
 independent of the scraper's own output schema (`04 - Scraper Deployment Scaffold`, a separate
 in-progress piece).
 
-**W3.3/W3.4 (from 05 §4 — Dialer & Outreach)** are unusually well-specified for "documented only"
-entries — the attempt matrix's actual numbers are given (6 attempts no-answer, 4 busy, 8
-gatekeeper, hard-stop on opt-out, 4-wave 90-120 day recycling) and post-call synthesis's exact
-output contract is given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence).
-Not scaffolded anyway because both depend on the dialer's own call-event data existing first — that
-event only exists once Telnyx is live (Phase 5) or at minimum once the hopper/queue layer (W3.1/
-W3.2) is built and generating real dispositions to react to. Worth building for real as soon as
-either exists; the logic itself isn't blocked on a design decision the way most "documented only"
-entries are.
+**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded this pass.** Unusually well-specified for
+what had been "documented only" entries — the attempt matrix's actual numbers are given (6 attempts
+no-answer, 4 busy, 8 gatekeeper, hard-stop on opt-out, 4-wave 90-120 day recycling, hard-coded
+directly into the workflow rather than left as prose) and post-call synthesis's exact output
+contract is given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence, enforced
+via Claude's Structured Outputs). Neither is *wired to anything live* yet — both depend on the
+dialer's own call-event data existing first, which needs Telnyx (Phase 5) or at minimum the
+hopper/queue layer (W3.1/W3.2, still not built) generating real dispositions to react to — but the
+decision logic itself is real and ready, not blocked on a design question the way W3.1/W3.2 still
+are. See `phase-3-dialer-hopper/README.md`.
 
 ## Phase 4 — Intelligence Layer
 
@@ -155,21 +161,24 @@ entries are.
 |---|---|---|---|---|
 | W4.1 | Client health/usage scoring | Schedule or usage-event | Auto (internal scoring) | Documented only |
 | W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | Documented only |
-| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | Documented only |
+| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json` |
 | W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | Documented only |
 | W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | Documented only |
-| W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | Documented only |
+| W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | **Scaffolded** — `phase-4-intelligence-layer/loss-reason-capture.workflow.json` |
 | W4.7 | Opening-line conversion tracking | Deal outcome, keyed to Deep Dive's recommended opening | Auto (internal analytics) | Documented only |
 
-Not scaffolded: W4.1's scoring formula (which usage signals, what weighting) isn't decided —
-building it now would mean inventing the formula, not encoding a specified one. W4.4 references "the
-existing AI Activity Summary automation," which isn't present in this Drive folder or this repo —
-worth locating before extending it. W4.5-W4.7 (new in roadmap v2's "gap-fills folded in") are each
-blocked on something upstream that doesn't exist yet, not on an undecided design: W4.5 needs the
-Front Door Audit service itself first (not built — see Phase 1); W4.6 needs a "Lost" stage/reason
-field defined on the Opportunity (a Twenty CRM config step); W4.7 needs Deep Dive Research's opening-
-line recommendation to actually be a trackable, ID'd field on the Opportunity, which depends on
-Deep Dive Research's own contract (also not built — see Phase 1).
+**W4.3 and W4.6 scaffolded this pass** — see `phase-4-intelligence-layer/README.md` for both,
+including W4.3's named-placeholder thresholds and its dependency on W4.1 (not built) for the
+`engagementScore` field it filters on.
+
+Still not scaffolded: W4.1's scoring formula (which usage signals, what weighting) isn't decided —
+building it now would mean inventing the formula, not encoding a specified one. W4.2 depends on
+W4.1. W4.4 references "the existing AI Activity Summary automation," which isn't present in this
+Drive folder or this repo — worth locating before extending it. W4.5/W4.7 are each blocked on
+something upstream that doesn't exist yet, not on an undecided design: W4.5 needs the Front Door
+Audit service itself first (not built — see Phase 1); W4.7 needs Deep Dive Research's opening-line
+recommendation to actually be a trackable, ID'd field on the Opportunity, which depends on Deep Dive
+Research's own contract (also not built — see Phase 1).
 
 **Iridium tier protection (05 §9, policy note, not a workflow):** the top service tier is explicitly
 carved out of every automated pipeline change here — "untouched by automated pipeline changes;
@@ -266,6 +275,11 @@ v2 moved Documenso out of the Phase 1 credential set entirely (see `phase-1-mvp/
 workflow needs a credential with no Secrets Store entry yet (e.g. the Places API key — see
 `src/server/README.md`), that's flagged the same way there.
 
+**Two more such gaps, found while building Phase 2's alert dispatcher:** `SLACK_WEBHOOK_URL` and
+`SMS_PROVIDER_URL` are referenced by `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`
+but neither Slack nor an SMS provider appears in `02 - Launch Checklist` at all — not even as a
+deferred item. Worth resolving before that workflow matters for real; see that folder's README.
+
 ## How this library relates to the rest of the repo
 
 - `command-center/` — Piece 1, gathers these credentials in the first place. Updated for v2: Stripe
@@ -273,14 +287,18 @@ workflow needs a credential with no Secrets Store entry yet (e.g. the Places API
 - `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 — none of
   the changes (Front Door Audit, e-sign, Stripe, CRM Architecture) touch the KB demo generator's own
   scope.
-- `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend), new this pass. Its two fully
-  functional Netlify Functions (`get-opportunity`, `create-checkout-session`) and the e-sign capture
-  flow (`proposal.html` + `submit-esign`) are the other end of the W1.4/W1.6 workflows here — see
-  `portal/README.md`.
+- `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend), built the pass after brief
+  v2 landed. Its two fully functional Netlify Functions (`get-opportunity`,
+  `create-checkout-session`) and the e-sign capture flow (`proposal.html` + `submit-esign`) are the
+  other end of the W1.4/W1.6 workflows here — see `portal/README.md`.
+- `phase-2-calendar-nurture-alerts/`, `phase-3-dialer-hopper/`, `phase-4-intelligence-layer/` — six
+  more automations scaffolded this pass (W2.4, W2.6, W3.3, W3.4, W4.3, W4.6), picked because their
+  *mechanics* weren't blocked on an undecided business rule even where their inputs — SLA thresholds
+  for W4.3, live call-event data for W3.3/W3.4 — still are. Where a number genuinely wasn't decided
+  (W4.3's referral thresholds), it's a named placeholder rather than an invented default, same
+  pattern as every credential in this repo.
 - Everything else here (Deep Dive Research, Front Door Audit, the Demo Dashboard/CRM write targets,
-  nurture/CX content, health scoring, Telnyx activation, Internal Team Messaging) is **new scope
-  this library surfaces but doesn't build** — cataloged so nothing named in the roadmap gets
-  silently lost, with each "Documented only" / "Not started" entry stating exactly what's blocking
-  it from being scaffolded for real. Stripe and the e-sign capture are the two exceptions that moved
-  from "surfaced" to "built" this pass (W1.4, W1.6) — see `phase-1-mvp/README.md` and
-  `portal/README.md`.
+  nurture/CX content, health scoring, Telnyx activation, Internal Team Messaging, the dialer hopper
+  itself) is **new scope this library surfaces but doesn't build** — cataloged so nothing named in
+  the roadmap gets silently lost, with each "Documented only" / "Not started" entry stating exactly
+  what's blocking it from being scaffolded for real.

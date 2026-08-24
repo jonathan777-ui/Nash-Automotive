@@ -1,0 +1,117 @@
+{
+  "name": "Orbit AI - Phase 4 - Referral trigger (W4.3)",
+  "nodes": [
+    {
+      "id": "984c84cf-1284-4bab-a412-bc4aa0eb4eea",
+      "name": "Daily at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-800, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }]
+        }
+      }
+    },
+    {
+      "id": "8b488719-0875-4714-ba91-671768cae607",
+      "name": "List Live Client Opportunities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-580, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities?filter=stage[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "UNVERIFIED: the filter query string syntax (stage[eq]:LiveClient) is a guess at Twenty CRM's REST filtering convention, not confirmed. Also assumes every Opportunity carries a liveClientSince timestamp and an engagementScore field (the latter written by W4.1's health/usage scoring, not built) - if engagementScore doesn't exist yet, this workflow has nothing real to filter on and will need adjusting once W4.1 exists."
+    },
+    {
+      "id": "7546ddbb-e12b-4b01-8f2d-cf1f50378bc3",
+      "name": "Split Out",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-360, 0],
+      "parameters": {
+        "fieldToSplitOut": "data"
+      },
+      "notes": "UNVERIFIED: assumes the list response wraps records under a top-level 'data' array - same Twenty CRM REST-shape uncertainty as every workflow here, and the n8n Split Out node's own parameter name/shape for this n8n version isn't confirmed either."
+    },
+    {
+      "id": "8835ced5-7cd4-4f8c-beac-ad5471fe2c73",
+      "name": "Meets tenure + engagement threshold?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-140, 0],
+      "parameters": {
+        "jsCode": "// Neither number is specified by the brief - both are named placeholders standing in for a real\n// decision, same pattern as every other undecided-but-not-blocking value in this repo. Set real\n// values here (or via env vars) once the actual thresholds are decided; nothing else about this\n// workflow needs to change.\nconst MIN_TENURE_DAYS = Number($env.PLACEHOLDER_REFERRAL_TENURE_DAYS || 90);\nconst MIN_ENGAGEMENT_SCORE = Number($env.PLACEHOLDER_REFERRAL_ENGAGEMENT_THRESHOLD || 70);\n\nconst results = [];\nfor (const item of $input.all()) {\n  const opp = item.json;\n  const tenureDays = opp.liveClientSince\n    ? Math.floor((Date.now() - new Date(opp.liveClientSince).getTime()) / 86400000)\n    : 0;\n  const eligible = tenureDays >= MIN_TENURE_DAYS && (opp.engagementScore ?? 0) >= MIN_ENGAGEMENT_SCORE;\n  if (eligible) {\n    results.push({ json: { opportunityId: opp.id, companyName: opp.name, tenureDays, engagementScore: opp.engagementScore } });\n  }\n}\nreturn results;"
+      }
+    },
+    {
+      "id": "6fe18721-a59c-4415-830d-6054855639b6",
+      "name": "Flag referral-eligible on Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [100, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ referralEligible: true }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Auto-flags eligibility (internal, reversible) - per the automation risk boundary, actually ASKING the client for a referral is an external send and stays human-gated, which is why this workflow stops at flagging + alerting a rep, not drafting/sending anything itself."
+    },
+    {
+      "id": "b3bdc22d-dc2d-48c3-b493-027be31dafb1",
+      "name": "Alert rep",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [340, -80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'referral-trigger', message: $json.companyName + ' is now referral-eligible (' + $json.tenureDays + ' days tenure, engagement ' + $json.engagementScore + ') - reach out to ask.' }) }}",
+        "options": {}
+      },
+      "notes": "Calls the real alert-dispatcher workflow (phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json) by its webhook path, not a bare placeholder - this is the first workflow in this library built after that dispatcher existed, so it uses it directly instead of a standalone alert node."
+    }
+  ],
+  "connections": {
+    "Daily at 8am": {
+      "main": [[{ "node": "List Live Client Opportunities", "type": "main", "index": 0 }]]
+    },
+    "List Live Client Opportunities": {
+      "main": [[{ "node": "Split Out", "type": "main", "index": 0 }]]
+    },
+    "Split Out": {
+      "main": [[{ "node": "Meets tenure + engagement threshold?", "type": "main", "index": 0 }]]
+    },
+    "Meets tenure + engagement threshold?": {
+      "main": [[{ "node": "Flag referral-eligible on Opportunity", "type": "main", "index": 0 }]]
+    },
+    "Flag referral-eligible on Opportunity": {
+      "main": [[{ "node": "Alert rep", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "name": "Orbit AI - Phase 4 - Loss-reason capture (W4.6)",
+  "nodes": [
+    {
+      "id": "1b0945ae-7254-450a-8fce-d4fec14fa0a4",
+      "name": "Mark-lost webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mark-lost",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Input contract: {opportunityId, restrictionReason: 'DNC'|'Not Interested'|'Bad Information', postLossTrack: 'Nurture'|'Restricted'} - the exact three-value/two-value sets CRM Architecture §13's post-loss routing section names. ASSUMES a rep (or a future automated rule) calls this explicitly when marking an Opportunity Lost, rather than this workflow being triggered by a generic Twenty CRM 'record updated' webhook watching for stage=Lost - the latter would need Twenty CRM's own webhook/trigger configuration confirmed, which isn't (same gap as everywhere else needing 'a real instance to check against')."
+    },
+    {
+      "id": "1f98fc18-8c32-4ced-84dd-67676988807e",
+      "name": "Valid restriction reason?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-360, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['DNC', 'Not Interested', 'Bad Information'].includes($json.body.restrictionReason) }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ ['Nurture', 'Restricted'].includes($json.body.postLossTrack) }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Rejects anything outside §13's own defined value sets rather than writing an arbitrary string to a field that other workflows (the DNC check, nurture cadence once built) will read and branch on - a typo'd reason here would silently break enforcement elsewhere."
+    },
+    {
+      "id": "660b0e19-ad4d-40a0-ad7f-942e689a79d8",
+      "name": "Write Lost + reason to Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-100, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Lost', restrictionReason: $json.body.restrictionReason, postLossTrack: $json.body.postLossTrack }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same Twenty CRM REST-shape uncertainty as every workflow in this library. These are the exact two fields the DNC-check workflow (phase-2-calendar-nurture-alerts/dnc-check.workflow.json) reads - keep both in sync if either field's name changes once checked against a real instance."
+    },
+    {
+      "id": "1d1b1248-5038-4d71-9c1a-8d349dc82d4d",
+      "name": "Respond: recorded",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [140, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}"
+      }
+    },
+    {
+      "id": "747776b1-65fb-4148-8858-cd116aa9ae39",
+      "name": "Respond: invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-100, 100],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: 'restrictionReason must be one of DNC/Not Interested/Bad Information, postLossTrack must be Nurture/Restricted.' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Mark-lost webhook": {
+      "main": [[{ "node": "Valid restriction reason?", "type": "main", "index": 0 }]]
+    },
+    "Valid restriction reason?": {
+      "main": [
+        [{ "node": "Write Lost + reason to Opportunity", "type": "main", "index": 0 }],
+        [{ "node": "Respond: invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Lost + reason to Opportunity": {
+      "main": [[{ "node": "Respond: recorded", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

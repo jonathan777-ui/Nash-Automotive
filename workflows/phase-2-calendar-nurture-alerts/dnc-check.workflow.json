@@ -1,0 +1,173 @@
+{
+  "name": "Orbit AI - Phase 2 - DNC / restriction check (W2.6, action-layer block)",
+  "nodes": [
+    {
+      "id": "bcd84b1e-cef4-4f83-94b9-2904bc282a93",
+      "name": "DNC check webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-700, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dnc-check",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "This is the 'hard action-layer block requiring logged admin override for exception calls' half of W2.6 - the other half (role-based hiding in the dialer UI) is a permissions config, not a workflow. Meant to be called SYNCHRONOUSLY by the dialer's own call-placement action before it ever dials, per §5/§13's framing that this is a block at the action layer, not just advisory. Input contract: {opportunityId: string, overrideRequested?: boolean, overrideBy?: string} - overrideBy should be the requesting agent's identifier, since an override without one can't be 'logged' meaningfully."
+    },
+    {
+      "id": "0f34a35e-9d8a-4adf-bdf2-ffc7921f6a37",
+      "name": "Fetch Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-460, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "ASSUMES the Restriction Reason (DNC/Not Interested/Bad Information) and Post-Loss Track (Nurture/Restricted) fields from CRM Architecture §13's post-loss routing section live directly on the Opportunity - same Twenty CRM REST-shape uncertainty as every other workflow in this library."
+    },
+    {
+      "id": "e09f5451-7c5f-49ed-92b6-650d66069dd6",
+      "name": "Is DNC?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-220, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.restrictionReason }}",
+              "rightValue": "DNC",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "33360b0d-9bbb-4127-b2cc-cf203d00a0b6",
+      "name": "Override requested & logged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [20, -80],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('DNC check webhook').item.json.body.overrideRequested }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $('DNC check webhook').item.json.body.overrideBy }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ab733033-d958-427a-809b-276b597dd306",
+      "name": "Log override to Activity Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, -140],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('DNC check webhook').item.json.body.opportunityId, type: 'DncOverride', by: $('DNC check webhook').item.json.body.overrideBy, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Writes to the Activity Event timeline from CRM Architecture §13 - the append-only log an override like this has to land in for 'logged admin override' to mean anything. Endpoint/shape is this workflow's own reasonable guess at how Activity Event gets written to, not confirmed - it's a newer concept in §13 with no worked API example."
+    },
+    {
+      "id": "83f9286b-e324-4ecb-8b53-2073f2f06038",
+      "name": "Respond: allowed (override)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [500, -140],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ allowed: true, reason: 'DNC override logged' }) }}"
+      }
+    },
+    {
+      "id": "b567ae87-20e0-4519-9bd7-112c7a76d67d",
+      "name": "Respond: blocked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [260, 20],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 403,
+        "responseBody": "={{ JSON.stringify({ allowed: false, reason: 'DNC - no override provided' }) }}"
+      }
+    },
+    {
+      "id": "e9a2c551-4878-4c03-a4f1-9fcfc531e2d6",
+      "name": "Respond: allowed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [20, 120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ allowed: true }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "DNC check webhook": {
+      "main": [[{ "node": "Fetch Opportunity", "type": "main", "index": 0 }]]
+    },
+    "Fetch Opportunity": {
+      "main": [[{ "node": "Is DNC?", "type": "main", "index": 0 }]]
+    },
+    "Is DNC?": {
+      "main": [
+        [{ "node": "Override requested & logged?", "type": "main", "index": 0 }],
+        [{ "node": "Respond: allowed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Override requested & logged?": {
+      "main": [
+        [{ "node": "Log override to Activity Event", "type": "main", "index": 0 }],
+        [{ "node": "Respond: blocked", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log override to Activity Event": {
+      "main": [[{ "node": "Respond: allowed (override)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

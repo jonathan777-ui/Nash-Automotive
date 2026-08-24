@@ -59,10 +59,10 @@ See `phase-0-infrastructure/README.md`.
 |---|---|---|---|---|
 | W1.1 | Lead intake → **parallel** Deep Dive Research + Front Door Audit → Demo Dashboard write | Webhook (lead form / scraper handoff) | Auto (enrichment, internal) | **Scaffolded**, with named placeholders for the two not-yet-built services — `phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` |
 | W1.2 | Demo generation trigger | Webhook (Demo Dashboard "generate" action) | Auto (internal) | **Partially built** — real logic is `src/server/`'s `POST /generate-demo` (checkpoint 5, code-complete); this workflow is the thin n8n wrapper around it. **Scaffolded** — `phase-1-mvp/demo-generation-trigger.workflow.json` |
-| W1.3 | Proposal delivery | Manual (rep sends) or CRM stage change | Auto to generate, human decides when to send | **Documented only** — the brief doesn't specify a "Proposal" document format/template yet; building the send step without one would mean inventing the proposal's actual content. |
-| W1.4 | Portal e-sign submitted → CRM advance | Webhook (portal's own lightweight inline e-sign capture) | Auto (internal stage advance) | **Scaffolded** — `phase-1-mvp/portal-esign-submitted.workflow.json`. **v2 change:** replaces the old Documenso-webhook workflow entirely — MVP e-sign is now typed name + checkbox + timestamp + IP captured on the portal itself, not a third-party vendor. |
-| W1.5 | Onboarding Form submitted → CRM update | Webhook (portal form) | Auto (internal) | **Documented only** — the Onboarding Form's field schema isn't specified yet; the portal itself (Netlify-hosted) isn't built in this repo. |
-| W1.6 | Stripe payment → CRM advance → Live Client | Webhook (Stripe) | Auto — the brief's own explicit resolution of the billing-stage tension (see below) | **Scaffolded**, built with placeholder Stripe credentials — `phase-1-mvp/stripe-payment-to-crm.workflow.json`. **v2 change:** pulled forward from Phase 5 (deferred) into Phase 1 (build now, activates on real keys) — Stripe has no verification-queue blocker, unlike Telnyx. |
+| W1.3 | Proposal delivery | Manual (rep sends) or CRM stage change | Auto to generate, human decides when to send | **Partially built** — `portal/public/proposal.html` exists and renders real tier/price options, but the surrounding proposal copy/terms are placeholder text (the brief doesn't specify the actual document content); no separate "delivery" workflow (email/link-send) is scaffolded. |
+| W1.4 | Portal e-sign submitted → CRM advance | Webhook (portal's own lightweight inline e-sign capture) | Auto (internal stage advance) | **Scaffolded, both sides** — `portal/public/proposal.html` + `portal/netlify/functions/submit-esign.mts` (the real capture UI and its backend) posting to `phase-1-mvp/portal-esign-submitted.workflow.json` (the n8n side). |
+| W1.5 | Onboarding Form submitted → CRM update | Webhook (portal form) | Auto (internal) | **Partially built** — `portal/public/onboarding.html` exists, but its detail fields (hours, contact email) are structural placeholders that don't submit anywhere yet; the brief doesn't specify the Onboarding Form's real field schema. The page's Stripe payment step (W1.6) is fully functional. |
+| W1.6 | Stripe payment → CRM advance → Live Client | Webhook (Stripe) | Auto — the brief's own explicit resolution of the billing-stage tension (see below) | **Scaffolded, both sides** — `portal/netlify/functions/create-checkout-session.mts` (creates the real Checkout Session, tier prices from the brief) + `phase-1-mvp/stripe-payment-to-crm.workflow.json` (the webhook/CRM-advance side), both against placeholder Stripe credentials until real ones land. **v2 change:** pulled forward from Phase 5 (deferred) into Phase 1 — Stripe has no verification-queue blocker, unlike Telnyx. |
 | W1.7 | Documents/Files access (PIN-gated, post-payment Drive folder repurposing) | Client action on the portal | Auto (internal, with an access audit log per §13) | Documented only |
 
 Portal step order per the brief: Proposal (W1.3) → e-sign (W1.4) → Onboarding Form (W1.5) → Stripe
@@ -273,9 +273,14 @@ workflow needs a credential with no Secrets Store entry yet (e.g. the Places API
 - `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 — none of
   the changes (Front Door Audit, e-sign, Stripe, CRM Architecture) touch the KB demo generator's own
   scope.
+- `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend), new this pass. Its two fully
+  functional Netlify Functions (`get-opportunity`, `create-checkout-session`) and the e-sign capture
+  flow (`proposal.html` + `submit-esign`) are the other end of the W1.4/W1.6 workflows here — see
+  `portal/README.md`.
 - Everything else here (Deep Dive Research, Front Door Audit, the Demo Dashboard/CRM write targets,
   nurture/CX content, health scoring, Telnyx activation, Internal Team Messaging) is **new scope
   this library surfaces but doesn't build** — cataloged so nothing named in the roadmap gets
   silently lost, with each "Documented only" / "Not started" entry stating exactly what's blocking
-  it from being scaffolded for real. Stripe is the one exception that moved from "surfaced" to
-  "built" this pass (W1.6) — see `phase-1-mvp/README.md`.
+  it from being scaffolded for real. Stripe and the e-sign capture are the two exceptions that moved
+  from "surfaced" to "built" this pass (W1.4, W1.6) — see `phase-1-mvp/README.md` and
+  `portal/README.md`.

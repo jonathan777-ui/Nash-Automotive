@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your Proposal — Orbit AI</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <span class="name">Orbit AI</span>
+    <span id="company-name" class="subtitle"></span>
+  </header>
+
+  <div class="disclaimer">
+    <strong>Placeholder content notice:</strong> the proposal copy/terms below are structural
+    placeholders — the brief doesn't yet specify the actual Proposal document's content
+    (<code>W1.3</code> in <code>workflows/README.md</code>). Package tiers and prices are real
+    (per the brief's KB tier structure); the surrounding language is not final copy.
+  </div>
+
+  <h1>Your Orbit AI Proposal</h1>
+  <p class="subtitle">Choose a package, then sign below to move to onboarding.</p>
+
+  <div id="content">
+    <div class="card"><p class="skeleton">Loading…</p></div>
+  </div>
+
+  <footer class="steps">
+    <span>1. Audit →</span>
+    <span>2. Demo →</span>
+    <span class="current">3. Proposal</span>
+    <span>→ 4. Sign</span>
+    <span>→ 5. Onboard</span>
+  </footer>
+</div>
+
+<script src="/portal.js"></script>
+<script>
+const TIERS = [
+  { id: 'Gold', label: 'Gold', price: '$750', note: 'Up to 5 additional pages included.' },
+  { id: 'Platinum', label: 'Platinum', price: '$1,650', note: 'Unlimited additional pages.' },
+  { id: 'Iridium', label: 'Iridium', price: '$2,600', note: 'Unlimited additional pages.' },
+  { id: 'Rhodium', label: 'Rhodium', price: 'Custom', note: 'Contact us for scope + pricing.', custom: true },
+];
+
+let selectedTier = null;
+
+function renderTiers() {
+  return `
+    <div class="tier-options" id="tier-options">
+      ${TIERS.map(
+        (t) => `
+        <div class="tier-option" data-tier="${t.id}">
+          <div class="tier-name">${t.label}</div>
+          <div class="tier-price">${t.price}</div>
+          <div class="tier-price">${t.note}</div>
+        </div>`,
+      ).join('')}
+    </div>
+  `;
+}
+
+function renderEsignForm(opportunityId) {
+  return `
+    <div class="card">
+      <p>By signing below, you agree to move forward with the selected Orbit AI package under the
+      terms of this proposal.</p>
+      <label for="typedName">Typed full name (serves as your signature)</label>
+      <input type="text" id="typedName" placeholder="Jane Smith" />
+      <div class="check-row">
+        <input type="checkbox" id="agree" />
+        <label for="agree">I have read and agree to the proposal terms above, and I'm authorized to sign on behalf of this business.</label>
+      </div>
+      <button class="primary" id="signBtn">Sign & continue</button>
+      <div id="signMsg" class="msg"></div>
+    </div>
+  `;
+}
+
+async function main() {
+  const contentEl = document.getElementById('content');
+  const result = await fetchOpportunity();
+
+  if (!result.ok) {
+    contentEl.innerHTML = `<div class="card"><p class="msg error">${escapeHtml(result.reason)}</p></div>`;
+    return;
+  }
+
+  const opp = result.opportunity;
+  const opportunityId = getOpportunityId();
+  document.getElementById('company-name').textContent = opp.companyName;
+  document.title = `${opp.companyName}'s Proposal — Orbit AI`;
+
+  contentEl.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">Select a package</h2>
+      ${renderTiers()}
+    </div>
+    ${renderEsignForm(opportunityId)}
+  `;
+
+  document.querySelectorAll('.tier-option').forEach((el) => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.tier-option').forEach((o) => o.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedTier = el.getAttribute('data-tier');
+    });
+  });
+
+  document.getElementById('signBtn').addEventListener('click', async () => {
+    const msgEl = document.getElementById('signMsg');
+    const typedName = document.getElementById('typedName').value.trim();
+    const agreed = document.getElementById('agree').checked;
+
+    if (!selectedTier) return (msgEl.textContent = 'Select a package first.'), (msgEl.className = 'msg error');
+    if (!typedName) return (msgEl.textContent = 'Type your full name to sign.'), (msgEl.className = 'msg error');
+    if (!agreed) return (msgEl.textContent = 'Check the agreement box to continue.'), (msgEl.className = 'msg error');
+
+    const btn = document.getElementById('signBtn');
+    btn.disabled = true;
+    msgEl.textContent = 'Signing…';
+    msgEl.className = 'msg';
+
+    try {
+      const res = await fetch('/api/esign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunityId, typedName, checked: true }),
+      });
+      const body = await res.json();
+      if (!body.ok) throw new Error(body.reason || 'Signing failed.');
+
+      msgEl.textContent = 'Signed. Redirecting…';
+      msgEl.className = 'msg success';
+      window.location.href = `/onboarding.html?id=${encodeURIComponent(opportunityId)}&tier=${encodeURIComponent(selectedTier)}`;
+    } catch (err) {
+      msgEl.textContent = err.message;
+      msgEl.className = 'msg error';
+      btn.disabled = false;
+    }
+  });
+}
+
+main();
+</script>
+</body>
+</html>

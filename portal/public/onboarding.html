@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onboarding — Orbit AI</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <span class="name">Orbit AI</span>
+    <span id="company-name" class="subtitle"></span>
+  </header>
+
+  <div id="payment-banner"></div>
+
+  <h1>Onboarding</h1>
+  <p class="subtitle">Almost there — confirm a few details, then complete payment to go live.</p>
+
+  <div id="content">
+    <div class="card"><p class="skeleton">Loading…</p></div>
+  </div>
+
+  <footer class="steps">
+    <span>1. Audit →</span>
+    <span>2. Demo →</span>
+    <span>3. Proposal →</span>
+    <span>4. Sign →</span>
+    <span class="current">5. Onboard</span>
+  </footer>
+</div>
+
+<script src="/portal.js"></script>
+<script>
+async function main() {
+  const contentEl = document.getElementById('content');
+  const bannerEl = document.getElementById('payment-banner');
+  const params = new URLSearchParams(window.location.search);
+  const opportunityId = getOpportunityId();
+  const tier = params.get('tier') || 'Gold';
+  const paymentState = params.get('payment');
+
+  if (paymentState === 'success') {
+    bannerEl.innerHTML = `<div class="card"><p class="msg success">Payment received — welcome aboard. ${statusBadge('Provisioning: Pending', 'pending')}</p></div>`;
+  } else if (paymentState === 'cancelled') {
+    bannerEl.innerHTML = `<div class="card"><p class="msg error">Checkout was cancelled — no charge was made. You can try again below.</p></div>`;
+  }
+
+  const result = await fetchOpportunity();
+  if (!result.ok) {
+    contentEl.innerHTML = `<div class="card"><p class="msg error">${escapeHtml(result.reason)}</p></div>`;
+    return;
+  }
+
+  const opp = result.opportunity;
+  document.getElementById('company-name').textContent = opp.companyName;
+  document.title = `${opp.companyName}'s Onboarding — Orbit AI`;
+
+  contentEl.innerHTML = `
+    <div class="card">
+      <p class="msg" style="color:var(--text-muted)">
+        <strong>Placeholder notice:</strong> the fields below are structural placeholders — the
+        brief doesn't yet specify the Onboarding Form's real field schema
+        (<code>W1.5</code> in <code>workflows/README.md</code>). They don't submit anywhere yet.
+        The <strong>payment step below is fully functional</strong> against Stripe (using
+        placeholder keys until real ones are configured).
+      </p>
+      <label for="hours">Confirm business hours</label>
+      <input type="text" id="hours" placeholder="e.g. Mon–Fri 9–5" />
+      <label for="contactEmail">Best contact email for onboarding updates</label>
+      <input type="email" id="contactEmail" placeholder="you@example.com" />
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Complete payment — ${escapeHtml(tier)} package</h2>
+      <p>You'll be redirected to Stripe's secure checkout.</p>
+      <button class="primary" id="payBtn">Proceed to payment</button>
+      <div id="payMsg" class="msg"></div>
+    </div>
+  `;
+
+  document.getElementById('payBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('payBtn');
+    const msgEl = document.getElementById('payMsg');
+    btn.disabled = true;
+    msgEl.textContent = 'Creating checkout session…';
+    msgEl.className = 'msg';
+
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunityId, tier }),
+      });
+      const body = await res.json();
+      if (!body.ok) throw new Error(body.reason || 'Could not start checkout.');
+      window.location.href = body.checkoutUrl;
+    } catch (err) {
+      msgEl.textContent = err.message;
+      msgEl.className = 'msg error';
+      btn.disabled = false;
+    }
+  });
+}
+
+main();
+</script>
+</body>
+</html>

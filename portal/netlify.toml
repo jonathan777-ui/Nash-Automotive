@@ -1,0 +1,12 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Placeholder-strategy rule (per the brief): every credential this site's Functions read
+# (TWENTY_CRM_API_KEY, STRIPE_SECRET_KEY, N8N_ESIGN_WEBHOOK_URL, etc.) is set as a real Netlify
+# environment variable via the Netlify UI/CLI, never committed here. Until they're set, the
+# Functions fall back to named PLACEHOLDER_* values (see netlify/functions/lib/*.ts) so calls fail
+# clearly instead of silently.

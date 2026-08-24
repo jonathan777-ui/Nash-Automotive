@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your Front Door Audit — Orbit AI</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <span class="name">Orbit AI</span>
+    <span id="company-name" class="subtitle"></span>
+  </header>
+
+  <div class="disclaimer">
+    This is a <strong>Front Door Audit</strong> — a scored read on how your website and online
+    presence show up to both people and AI answer engines (ChatGPT, Gemini, AI Overviews) today.
+    It's proof, not a pitch: every number below comes from your actual public presence.
+  </div>
+
+  <h1>Your Front Door Audit</h1>
+  <p class="subtitle">Page 0.5 — before the demo, here's where you stand right now.</p>
+
+  <div id="content">
+    <div class="card"><p class="skeleton">Loading your audit…</p></div>
+  </div>
+
+  <footer class="steps">
+    <span class="current">1. Audit</span>
+    <span>→ 2. Demo</span>
+    <span>→ 3. Proposal</span>
+    <span>→ 4. Sign</span>
+    <span>→ 5. Onboard</span>
+  </footer>
+</div>
+
+<script src="/portal.js"></script>
+<script>
+(async function () {
+  const contentEl = document.getElementById('content');
+  const result = await fetchOpportunity();
+
+  if (!result.ok) {
+    contentEl.innerHTML = `<div class="card"><p class="msg error">${escapeHtml(result.reason)}</p></div>`;
+    return;
+  }
+
+  const opp = result.opportunity;
+  document.getElementById('company-name').textContent = opp.companyName;
+  document.title = `${opp.companyName}'s Front Door Audit — Orbit AI`;
+
+  const auditDone = opp.frontDoorAuditStatus === 'Complete';
+
+  let auditBlock;
+  if (auditDone && typeof opp.frontDoorAuditScore === 'number') {
+    auditBlock = `
+      <div class="score-row">
+        <div class="score-circle">${escapeHtml(String(opp.frontDoorAuditScore))}</div>
+        <div class="score-labels">
+          <div>Current Front Door Score, out of 100</div>
+          <div class="lift">See the full breakdown and rebuild target in your detailed report →</div>
+        </div>
+      </div>
+      ${opp.frontDoorAuditReportUrl ? `<a class="primary" style="display:inline-block;text-decoration:none;text-align:center" href="${escapeHtml(opp.frontDoorAuditReportUrl)}" target="_blank" rel="noopener">Open full audit report</a>` : ''}
+    `;
+  } else {
+    auditBlock = `<p>${statusBadge('Audit in progress', 'pending')} — this finishes shortly after your demo request comes in. Check back, or continue to your demo below.</p>`;
+  }
+
+  contentEl.innerHTML = `
+    <div class="card">
+      ${auditBlock}
+    </div>
+    <a class="primary" style="display:inline-block;text-decoration:none;text-align:center" href="/proposal.html?id=${encodeURIComponent(getOpportunityId())}">Continue to your proposal →</a>
+  `;
+})();
+</script>
+</body>
+</html>

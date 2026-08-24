@@ -1,0 +1,17 @@
+{
+  "name": "orbit-client-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Piece 1 of Phase 1's MVP funnel (per the brief): the client-facing portal - Why-the-Audit, Audit report, Proposal + lightweight e-sign, Onboarding Form + Stripe. Netlify-hosted (static pages + Netlify Functions).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^3.0.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

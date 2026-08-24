@@ -1,6 +1,6 @@
 # Orbit AI — Lead-to-Onboarding Pipeline (this repo)
 
-This repo holds two independently-deployable pieces of Orbit AI's lead-to-onboarding system, per
+This repo holds the independently-deployable pieces of Orbit AI's lead-to-onboarding system, per
 the project brief's build order:
 
 - **`command-center/`** — Piece 1 (build first): the persistent Operations Command Center,
@@ -11,6 +11,11 @@ the project brief's build order:
   prospect's Google Business Profile (or a scraped website, or a manual City/State/niche form)
   gets combined with the matching niche KB to produce a Unified KB that powers three demo surfaces
   at once — AI Voice Receptionist, Chatbot preview, Website preview.
+- **`portal/`** — the client-facing portal: Front Door Audit page → Proposal + lightweight e-sign →
+  Onboarding + Stripe payment. Netlify-hosted static pages + Functions. See `portal/README.md`.
+- **`workflows/`** — the n8n automation library tying the whole pipeline together end to end
+  (lead intake, CRM writes, alerts, nurture, the dialer, and everything else the brief names). See
+  `workflows/README.md`.
 
 Piece 2 (the rest of the Command Center — pipeline visibility, system health, internal team
 messaging) is lower priority and grows incrementally after Piece 1 ships; not started.
@@ -172,5 +177,34 @@ either — both have their source content already (`kbDoc.sections` §12/§13), 
 surface yet.
 
 Also see `workflows/` for the n8n automation library spanning the rest of the lead-to-onboarding
-pipeline (Phases 0-7 of `01 - Roadmap`) — this repo's two pieces (Command Center, demo generator)
-are two nodes in that larger system, not the whole of it.
+pipeline (Phases 0-7 of `01 - Roadmap`) — this repo's pieces are nodes in that larger system, not
+the whole of it.
+
+## Path to live — what plugging in real credentials actually activates
+
+Nothing in this repo is waiting on more code to go live — every piece that's marked "code-complete"
+above needs credentials, not further building, from here. In brief-recommended order:
+
+1. **Deploy the Command Center** (`command-center/DEPLOY.md`) and run through its vendor checklist —
+   this is where every credential gets gathered, either via one-click CLI auth or manual paste into
+   Cloudflare Secrets Store.
+2. **Deploy `src/server/`** (the demo generator) wherever it's meant to run long-term (the Oracle
+   box, per the brief's infra split — `npm run serve`, or a process manager/Docker wrapper around
+   it) with `CLAUDE_API_KEY` and a Google Places API key in its environment.
+3. **Deploy `portal/`** to Netlify (`netlify deploy`, or connect the repo with `portal/` as the base
+   directory) with `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`, `STRIPE_SECRET_KEY`, and
+   `N8N_ESIGN_WEBHOOK_URL` set as real Netlify environment variables.
+4. **Stand up n8n on the Oracle box** and import the workflows in `workflows/phase-0-infrastructure/`
+   and `workflows/phase-1-mvp/` — each will need the hand-fixing its own README already flags (the
+   Merge node in W1.1, the raw-body/signature path in the Stripe workflow, and Twenty CRM's exact
+   field names once a real instance exists to check them against).
+5. **Configure Twenty CRM** — Opportunity pipeline stages matching what every workflow/function here
+   assumes (Demo Queue, Pending Demos, Contract Signed, Onboarding, Live Client, ...), plus the
+   Communications Hub and Documents/Files custom objects from `05 §13` once those are built.
+
+Once 1-5 are done, the only remaining gaps are the pieces flagged throughout as genuinely new design
+work, not missing credentials: Deep Dive Research and Front Door Audit as real services (their
+contracts/scoring logic aren't specified), and the three demo-rendering surfaces (AI Receptionist,
+Chatbot, Website preview) consuming `UnifiedKb` output. Everything else should activate as soon as
+its credentials land — that's what every "PLACEHOLDER_..." value and named env var throughout this
+repo was built to do.

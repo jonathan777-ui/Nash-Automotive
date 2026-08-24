@@ -1,0 +1,117 @@
+{
+  "name": "Orbit AI - Phase 1 - Demo generation trigger",
+  "nodes": [
+    {
+      "id": "4f27a9e9-69ef-4032-8e19-da47b9a63588",
+      "name": "Generate demo webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-demo-trigger",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "notes": "Synchronous response (waits for the last node), unlike the lead-intake webhook - a rep clicking 'Generate Demo' on the Demo Dashboard reasonably wants to see success/failure, not just an ack. Reconsider if demo generation ends up too slow for a synchronous UI wait once real latency is known (checkpoint 4's README flags generation time as unmeasured against the live Claude API)."
+    },
+    {
+      "id": "24059a27-0f5b-4d8f-874c-255c2463f09e",
+      "name": "Call demo generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DEMO_GENERATOR_URL }}/generate-demo",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ vertical: $json.body.vertical, niche: $json.body.niche, gbpUrl: $json.body.gbpUrl, websiteUrl: $json.body.websiteUrl, manualForm: $json.body.manualForm }) }}",
+        "options": {
+          "response": { "neverError": true }
+        }
+      },
+      "notes": "This is the ONE workflow in this library calling a real, built, tested contract - src/server/ (checkpoint 5 of the KB demo generator, this same repo). Request/response shape here is copied directly from src/server/README.md, not guessed. DEMO_GENERATOR_URL should point at wherever that service ends up running (Oracle box, alongside n8n, per the brief's infra split). The one still-uncertain part is the exact 'never error on 4xx/5xx' option name/nesting for this n8n version (options.response.neverError) - confirm against the real instance; without it, a 400/422/502 response throws instead of flowing into the IF node below."
+    },
+    {
+      "id": "4e61128d-67ac-4b16-b882-d5c24c53d25d",
+      "name": "Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-100, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3d2ce9b9-e861-489a-a410-8148f434caf1",
+      "name": "Advance to Pending Demos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, -100],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Pending Demos', demoStepUsed: $json.stepUsed }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same Twenty CRM REST-shape uncertainty as W1.1 - and this specifically also assumes the triggering webhook payload carries the Opportunity's Twenty CRM record ID as 'opportunityId', which needs confirming against whatever actually calls this webhook (the Demo Dashboard UI/action)."
+    },
+    {
+      "id": "a4f1b771-ae6f-41a2-9a77-cba7fbcb3289",
+      "name": "Alert: generation failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL || 'PLACEHOLDER_ALERT_WEBHOOK_URL' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'Demo generation failed for ' + $('Generate demo webhook').item.json.body.vertical + '/' + $('Generate demo webhook').item.json.body.niche + ': [' + $json.stage + '] ' + $json.reason }) }}",
+        "options": {}
+      },
+      "notes": "Inline placeholder alert rather than routing through W2.4 (not yet built) - once that alerts workflow exists, replace this node with a call into it instead of a bare webhook POST. Payload shape ({text: ...}) assumes a Slack-incoming-webhook-style target; adjust if the real alert channel ends up being SMS or something else, per the brief's 'Slack/SMS via n8n' phrasing which doesn't commit to one."
+    }
+  ],
+  "connections": {
+    "Generate demo webhook": {
+      "main": [[{ "node": "Call demo generator", "type": "main", "index": 0 }]]
+    },
+    "Call demo generator": {
+      "main": [[{ "node": "Generated OK?", "type": "main", "index": 0 }]]
+    },
+    "Generated OK?": {
+      "main": [
+        [{ "node": "Advance to Pending Demos", "type": "main", "index": 0 }],
+        [{ "node": "Alert: generation failed", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

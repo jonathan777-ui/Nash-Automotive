@@ -1,0 +1,96 @@
+{
+  "name": "Orbit AI - Phase 1 - Lead intake to Demo Dashboard",
+  "nodes": [
+    {
+      "id": "0f75742c-2ab6-4008-aa52-fffd47004d16",
+      "name": "Lead intake webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "Fire-and-forget: acknowledges immediately rather than waiting on Deep Dive Research + the CRM write to finish, since the caller (website form / scraper handoff / manual add) doesn't need that result synchronously."
+    },
+    {
+      "id": "26bdbc50-46cf-43c5-aab7-1d11931c64ee",
+      "name": "Normalize lead fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-360, 0],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "n1", "name": "companyName", "value": "={{ $json.body.companyName }}", "type": "string" },
+            { "id": "n2", "name": "contactName", "value": "={{ $json.body.contactName }}", "type": "string" },
+            { "id": "n3", "name": "phone", "value": "={{ $json.body.phone }}", "type": "string" },
+            { "id": "n4", "name": "email", "value": "={{ $json.body.email }}", "type": "string" },
+            { "id": "n5", "name": "source", "value": "={{ $json.body.source }}", "type": "string" },
+            { "id": "n6", "name": "vertical", "value": "={{ $json.body.vertical }}", "type": "string" },
+            { "id": "n7", "name": "niche", "value": "={{ $json.body.niche }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "UNCONFIRMED field shape - this assumes the lead-intake caller (website form, scraper handoff, manual add) posts these exact field names. No source in the brief specifies the lead form's actual schema; adjust to match once one exists."
+    },
+    {
+      "id": "cb801d67-20f0-4ddc-8e74-b103de45f926",
+      "name": "Deep Dive Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-120, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DEEP_DIVE_RESEARCH_URL || 'PLACEHOLDER_DEEP_DIVE_RESEARCH_URL' }}/research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "notes": "Deep Dive Research doesn't exist as a built service anywhere in this repo yet - only 'Claude: ... Deep Dive Research synthesis' is named in the brief, with no input/output contract specified. This node calls a named placeholder URL rather than guessing that contract. Per the brief's own architecture principle (demo generator = standalone service, not n8n Code nodes), this should most likely be another dedicated Node/TS service, not logic embedded in this workflow - real follow-up work once its contract is decided."
+    },
+    {
+      "id": "6c52c009-75bd-46f0-8b1e-75573a7a5940",
+      "name": "Write Opportunity to Twenty CRM (stage: Demo Queue)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [140, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $('Normalize lead fields').item.json.companyName, stage: 'Demo Queue', pointOfContact: $('Normalize lead fields').item.json.contactName, enrichment: $json }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "UNVERIFIED: assumes 'Demo Dashboard stage write' means setting a pipeline-stage field named 'stage' on a Twenty CRM Opportunity record via a REST endpoint shaped like POST /rest/opportunities - Twenty CRM's exact REST/GraphQL schema (field names, whether stage is a select-field option ID rather than a literal string) wasn't confirmed against real API docs from this sandbox. Confirm the real request/response shape against Jonathan's actual Twenty CRM instance before relying on this. Also see workflows/README.md's flagged assumption that 'Demo Dashboard' is a Twenty CRM pipeline view, not a separate system."
+    }
+  ],
+  "connections": {
+    "Lead intake webhook": {
+      "main": [[{ "node": "Normalize lead fields", "type": "main", "index": 0 }]]
+    },
+    "Normalize lead fields": {
+      "main": [[{ "node": "Deep Dive Research", "type": "main", "index": 0 }]]
+    },
+    "Deep Dive Research": {
+      "main": [[{ "node": "Write Opportunity to Twenty CRM (stage: Demo Queue)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "name": "Orbit AI - Phase 0 - Nightly backup",
+  "nodes": [
+    {
+      "id": "6d764a48-d370-4a6c-a94d-c41b31977dbc",
+      "name": "Every night at 3am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-400, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "notes": "Confirm the n8n instance's configured timezone before relying on '3am' meaning local time - no explicit timezone override is set here."
+    },
+    {
+      "id": "b167e9c3-6a4f-44b8-9c08-082752967345",
+      "name": "pg_dump scraper DB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-160, 0],
+      "parameters": {
+        "command": "=mkdir -p /tmp/orbit-backups && pg_dump -h localhost -U PLACEHOLDER_SCRAPER_DB_USER -d PLACEHOLDER_SCRAPER_DB_NAME -f /tmp/orbit-backups/scraper-{{ $now.format('yyyy-LL-dd') }}.sql"
+      },
+      "notes": "Runs inside the n8n container - only works if it has network access to the scraper's Postgres container and PGPASSWORD is set on the n8n container's environment (not embedded in this command). Only DB confirmed to exist at Phase 0 is the scraper's; add another Execute Command node per additional Postgres DB once one exists (n8n itself defaults to SQLite unless reconfigured - confirm before assuming a second DB here)."
+    },
+    {
+      "id": "b3f48202-7e30-45f6-a0d0-c75a40dd918a",
+      "name": "export n8n workflows",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [80, 0],
+      "parameters": {
+        "command": "=n8n export:workflow --all --output=/tmp/orbit-backups/n8n-workflows-{{ $now.format('yyyy-LL-dd') }}.json"
+      },
+      "notes": "n8n's own CLI export command - run from inside the n8n container so the CLI and the running instance share the same data directory."
+    },
+    {
+      "id": "3a618b31-245c-4cc1-bb74-4e1f0deefa63",
+      "name": "upload DB dump to R2",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [320, -80],
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "orbit-backups",
+        "fileName": "=scraper-{{ $now.format('yyyy-LL-dd') }}.sql",
+        "sourcePath": "=/tmp/orbit-backups/scraper-{{ $now.format('yyyy-LL-dd') }}.sql"
+      },
+      "credentials": {
+        "s3": {
+          "name": "Cloudflare R2 (S3-compatible)"
+        }
+      },
+      "notes": "UNVERIFIED: assumes the installed n8n version's S3 node exposes a custom endpoint field for R2's S3-compatible API (https://<account_id>.r2.cloudflarestorage.com) via the credential, not this node's parameters. If that field isn't there on the real instance, fall back to a raw HTTP Request node with AWS SigV4 auth against the same endpoint."
+    },
+    {
+      "id": "0012d695-b358-4d70-ad9a-5b9c9e6f97b7",
+      "name": "upload n8n export to R2",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [320, 80],
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "orbit-backups",
+        "fileName": "=n8n-workflows-{{ $now.format('yyyy-LL-dd') }}.json",
+        "sourcePath": "=/tmp/orbit-backups/n8n-workflows-{{ $now.format('yyyy-LL-dd') }}.json"
+      },
+      "credentials": {
+        "s3": {
+          "name": "Cloudflare R2 (S3-compatible)"
+        }
+      },
+      "notes": "Same R2 credential/endpoint caveat as the sibling upload node above."
+    }
+  ],
+  "connections": {
+    "Every night at 3am": {
+      "main": [[{ "node": "pg_dump scraper DB", "type": "main", "index": 0 }]]
+    },
+    "pg_dump scraper DB": {
+      "main": [[{ "node": "export n8n workflows", "type": "main", "index": 0 }]]
+    },
+    "export n8n workflows": {
+      "main": [
+        [
+          { "node": "upload DB dump to R2", "type": "main", "index": 0 },
+          { "node": "upload n8n export to R2", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

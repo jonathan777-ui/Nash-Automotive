@@ -17,9 +17,10 @@ and grows incrementally after Piece 1 ships; not started.
 
 ## Piece 3: KB-powered demo generator
 
-## Status: Checkpoint 4 — Unified KB assembly
+## Status: Checkpoint 5 — first full demo, end to end
 
-Checkpoints 1-4 are done; checkpoint 5 (first full demo, end to end) is next.
+All five checkpoints are done and code-complete. Nothing left to build for Piece 3 without live
+credentials — see `src/server/README.md` for exactly what's still unverified and why.
 
 **Checkpoint 1 — KB parsing/template system:**
 - `src/kb/atlasParser.ts` parses `kb-source/niche-atlas.md` (the master breadth map) into
@@ -87,8 +88,24 @@ niche KB to populate the Company Profile" → "a Unified KB powering three simul
   against a mocked client, including the real `law-firms.md` content as the "successful
   generation" fixture. Full caveat and what's worth checking once a key exists: `src/unifiedKb/README.md`.
 
-`npm test` runs all four checkpoints against real content (`kb-source/`) and mocked HTTP/API
-responses — 71 tests, all passing.
+**Checkpoint 5 — first full demo, end to end** ("a first full demo generated end to end, with all
+three surfaces... rendering from one Unified KB"):
+- `src/server/` is the standalone Node/TS HTTP service the brief calls for ("called via HTTP/
+  webhook from n8n — not n8n workflow JSON + Code nodes"), tying every prior checkpoint together
+  behind one `POST /generate-demo` endpoint: atlas-validated vertical/niche → input cascade →
+  base+overlay-aware Unified KB assembly. `GET /health` reports whether real API keys are
+  configured. See `src/server/README.md` for the full request/response contract, environment
+  variables, and what's still unverified without live keys.
+- The "all three surfaces" part of this checkpoint — AI Voice Receptionist, Chatbot preview,
+  Website preview actually *rendering* from the returned `UnifiedKb` — isn't built yet. The brief
+  flags that the AI Receptionist demo path can likely reuse the existing Cloudflare Workers/
+  Durable Objects setup from the live product; that needs checking against the live account before
+  building a new one from scratch (not yet investigated). The `UnifiedKb`'s `kbDoc.sections` (§12
+  Website copy, §13 Chatbot quick-replies) already carry the content each surface would need — what's
+  missing is the rendering layer per surface, not the content.
+
+`npm test` runs all five checkpoints against real content (`kb-source/`) and mocked HTTP/API
+responses — 84 tests, all passing.
 
 Run it:
 
@@ -136,10 +153,16 @@ work against however many verticals/niches actually exist in `niche-atlas.md` an
 automatically as more are named. It's flagged here so it isn't silently mistaken for 318 finished
 niches when someone next looks at this repo.
 
-## Next checkpoint
+## Next: past the five checkpoints
 
-Per the staged build-out: checkpoint 5 — a first full demo generated end to end, with all three
-surfaces (AI Voice Receptionist, Chatbot preview, Website preview) rendering from one Unified KB.
-The brief notes the AI Receptionist can likely reuse patterns from the existing Cloudflare
-Workers/Durable Objects setup that powers the live product's demo path — worth checking that
-before building a new one from scratch.
+Piece 3's `/generate-demo` endpoint is code-complete and returns a full `UnifiedKb` (checkpoint 5).
+What's not built yet is the three-surface *rendering* layer — the brief notes the AI Receptionist
+demo path can likely reuse the existing Cloudflare Workers/Durable Objects setup that powers the
+live product's demo path, which needs checking against the live account before building a new one
+from scratch (not yet investigated). Chatbot preview and Website preview rendering aren't built
+either — both have their source content already (`kbDoc.sections` §12/§13), just no rendering
+surface yet.
+
+Also see `workflows/` for the n8n automation library spanning the rest of the lead-to-onboarding
+pipeline (Phases 0-7 of `01 - Roadmap`) — this repo's two pieces (Command Center, demo generator)
+are two nodes in that larger system, not the whole of it.

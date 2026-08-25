@@ -64,7 +64,7 @@
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Post-call webhook').item.json.body.opportunityId }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ lastCallDisposition: $json.Disposition, lastCallSummary: $json.Summary, lastCallTryBackTime: $json['Try-Back Time'], lastCallDmPresence: $json['DM Presence'], lastCallRebuttalFlag: $json['Rebuttal After Decline'] }) }}",
+        "jsonBody": "={{ JSON.stringify({ lastCallDispositionAiSuggested: $json.Disposition, lastCallSummary: $json.Summary, lastCallTryBackTime: $json['Try-Back Time'], lastCallDmPresence: $json['DM Presence'], lastCallRebuttalFlag: $json['Rebuttal After Decline'] }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -73,7 +73,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a sales call is about advancing a specific deal, so it stays Opportunity-anchored regardless of pre- or post-sale timing. lastCallRebuttalFlag is new this pass - the global no-rebuttal-after-decline compliance policy's QA signal, see CRM-OBJECT-MODEL.md's Compliance layer section."
+      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a sales call is about advancing a specific deal, so it stays Opportunity-anchored regardless of pre- or post-sale timing. lastCallRebuttalFlag is new this pass - the global no-rebuttal-after-decline compliance policy's QA signal, see CRM-OBJECT-MODEL.md's Compliance layer section. IMPORTANT CHANGE this pass: this used to write lastCallDisposition directly, but call-wrap-up.workflow.json (new this pass) made the rep's own manually-entered disposition authoritative (per Jonathan's explicit 'user is required to enter disposition' instruction) - writing here would silently clobber that with an AI guess whenever this workflow ran after the rep's own submission. Renamed to lastCallDispositionAiSuggested, kept only as a QA cross-reference a future workflow could compare against the rep's entry to spot mismatches - that comparison isn't built."
     },
     {
       "id": "7c60cc42-4ebb-4518-987b-060f9eb02d6c",

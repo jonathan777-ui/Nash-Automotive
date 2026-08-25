@@ -84,6 +84,36 @@ ID, or an SMS message ID — never bare text claiming consent), *then* requires 
 the exception before the gate opens. Both checks fail closed: missing evidence blocks, and
 evidence that exists but hasn't been human-verified also blocks.
 
+**Daily attempt cap + two-wave cadence (locked this pass, supersedes the earlier 05 §4 numbers):**
+per Jonathan's explicit compliance-cadence instruction, non-Preview (auto-dialer: Power/multi-line)
+modes cap a lead at 2 attempts per calendar day — Preview is exempt since a human reviews and
+approves each individual dial, confirmed explicitly. Beyond the daily cap, the wave structure
+itself changed: **Wave 1** ("new lead") runs daily for up to 14 days back-to-back from its first
+attempt, capped at 7 total attempts, whichever limit hits first. **Wave 2** ("2nd rotation") starts
+after a 14-day gap (landing around week 4 from the lead's first attempt), runs for up to 3 days
+back-to-back, capped at 4 total attempts. Exhausting wave 2 moves the entry to a new terminal-but-
+revivable HopperEntry status, `FutureRework` (see below) — not deleted, not `OptedOut`, just parked.
+This replaces the original brief's 6/4/8-attempts-by-disposition-type, 4-wave, 90-120-day model —
+`05 §4`'s own text isn't edited to match, this is a deliberate live instruction overriding what that
+document stated as of the prior pass. See `phase-3-dialer-hopper/attempt-recycling-matrix.workflow.json`
+(W3.3) and `phase-3-dialer-hopper/hopper-request-next.workflow.json` (W3.1, enforces the daily cap
+at claim time).
+
+**Required disposition to advance (locked this pass):** per Jonathan's explicit instruction, a rep
+must submit a Call Note and a Disposition (Callback/Try-back date-time is optional) before the
+dialer will move to the next call — true in Preview and every auto-dialer mode alike. Built as a
+real gate, not a UI convention: W3.1 refuses to hand a rep a new HopperEntry while they still hold
+one `Claimed` and un-dispositioned, and the rep's own disposition entry (not an AI guess) is now
+what `attempt-recycling-matrix.workflow.json` (W3.3) acts on — `post-call-synthesis.workflow.json`
+(W3.4)'s AI-inferred disposition is kept only as a QA cross-reference (`lastCallDispositionAiSuggested`)
+so it never silently overwrites what the rep entered. See
+`phase-3-dialer-hopper/call-wrap-up.workflow.json` (W3.6, new this pass).
+
+**Per-user simultaneous-line scaling by drop rate — already covered, not a new mechanism.** "Scaling
+number of lines simultaneously one user can dial based on drop rate" is exactly what
+`currentAllowedSimultaneousCallsPerAgent` (Campaign, pacing-controller.workflow.json / W3.5, above)
+already governs — no separate per-rep field was needed.
+
 ## Hierarchy
 
 ```
@@ -214,23 +244,33 @@ The actual queueable unit — one row per Opportunity currently loaded into a Ca
 queue. This is where the shared-pool-vs-personal-hold distinction actually lives.
 
 - Fields: `id`, `campaignId`, `opportunityId`, `status` (`Available` / `Claimed` / `CallbackLocked` /
-  `Completed` / `OptedOut`), `claimedByRepId` (nullable — set while a rep is actively on the record,
-  or persistently for a `CallbackLocked` entry), `disposition` (last call outcome, from W3.4's
-  enum), `attemptCountThisWave`, `wave` (1-4), `lastAttemptDate`, `nextEligibleAt` (when a recycled
-  entry re-enters the pool).
+  `Completed` / `OptedOut` / `FutureRework` — the last is new this pass), `claimedByRepId` (nullable
+  — set while a rep is actively on the record, or persistently for a `CallbackLocked` entry),
+  `disposition` (last call outcome — the rep's own manual entry as of this pass, see the Compliance
+  layer's "Required disposition to advance" above, not `Connected-`/etc. inferred by AI),
+  `attemptCountThisWave`, `wave` (1-2, was 1-4 before this pass's cadence rewrite), `lastAttemptDate`,
+  `firstAttemptDateThisWave` (new this pass — when the current wave's attempt clock started, used to
+  check the wave's day-window), `attemptCountToday` (new this pass — resets whenever `lastAttemptDate`
+  isn't today, enforces the daily attempt cap), `nextEligibleAt` (when a recycled entry re-enters the
+  pool, or a Callback's rep-selected due time).
 - Assumed REST: `/rest/hopperEntries`, `/rest/hopperEntries/{id}`.
-- **The Callback vs. Try-back distinction, locked in this pass:**
+- **The Callback vs. Try-back distinction, locked:**
   - **Callback** (a lead asked for a specific personal follow-up) → `status: 'CallbackLocked'`,
     `claimedByRepId` stays set to whichever rep took the call. Removed from the shared pool; only
-    that rep sees it until the callback happens.
+    that rep sees it until the callback happens. The rep's optional date/time selection becomes
+    `nextEligibleAt`.
   - **Try-back** (no real distinct disposition value — this is the general *behavior* for every
     non-connected outcome: `NoAnswer`/`Busy`/`GatekeeperOnly`/`VoicemailLeft`) → the attempt-matrix's
-    existing `RETRY_NOW`/`RECYCLE_NEXT_WAVE` actions apply, and the entry goes back to
-    `status: 'Available'`, `claimedByRepId: null` — back in the **shared** hopper for any agent, not
-    locked to whoever called it last. This is what "try-back are placed back in campaign hopper,
-    keep leads being worked" meant.
-  - Hard stops (`OptOut`, `WrongNumber`, or the attempt matrix's `STOP`) → `status: 'Completed'` or
-    `'OptedOut'`, removed from the hopper entirely, never re-queued.
+    `RETRY_NOW`/`RECYCLE_NEXT_WAVE` actions apply, and the entry goes back to `status: 'Available'`,
+    `claimedByRepId: null` — back in the **shared** hopper for any agent, not locked to whoever
+    called it last. This is what "try-back are placed back in campaign hopper, keep leads being
+    worked" meant.
+  - Hard stops (`OptOut`, `WrongNumber`) → `status: 'OptedOut'` or `'Completed'`, removed from the
+    hopper entirely, never re-queued.
+  - **Wave-2 exhaustion (new this pass)** → `status: 'FutureRework'`, distinct from the hard stops
+    above: a revisitable holding state for a lead the current two-wave cadence has fully worked
+    without a hard stop, not a permanent one. Reviving `FutureRework` entries into a new
+    Campaign/wave 1 isn't built this pass — flagged, not silently assumed solved.
 
 ### ConsentRecord (new this pass)
 Evidence a contact affirmatively asked for something this system would otherwise block — right

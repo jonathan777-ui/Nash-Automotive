@@ -1,0 +1,186 @@
+{
+  "name": "Orbit AI - Phase 3 - Call wrap-up / required disposition (W3.6, new - not in the brief's original numbering)",
+  "nodes": [
+    {
+      "id": "fb53a915-d243-49c7-89fe-b6fdb590ce20",
+      "name": "Call wrap-up webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "call-wrap-up",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "The dialer UI is expected to call this exactly once per call, right after the rep finishes a claimed HopperEntry - per Jonathan's explicit instruction, submitting this (Call Note + Disposition required, Callback/Try-back date-time optional) is what unlocks moving to the next call, in both Preview and auto-dialer (Power/multi-line) modes; hopper-request-next.workflow.json (W3.1) now refuses to hand out a new entry to a rep who still has one Claimed and un-dispositioned, so the UI has no way around calling this first. Input contract: {hopperEntryId, opportunityId, repId, callNote: string (required), disposition: string (required, one of the 9 known values - see 'Validate submission'), scheduledAt?: ISO datetime (only meaningful when disposition is 'Callback'), attemptCountThisWave, wave, lastAttemptDate, firstAttemptDateThisWave, attemptCountToday, transcriptOrNotes?: string (optional - if given, triggers post-call-synthesis's AI QA pass)}. The wave/attempt fields are exactly what W3.1's claim response already handed the UI, just passed straight through here."
+    },
+    {
+      "id": "0bc9e3bb-a9c2-4373-af48-1acff6d0c391",
+      "name": "Validate submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-960, 0],
+      "parameters": {
+        "jsCode": "const DISPOSITIONS = ['Connected-Interested', 'Connected-NotInterested', 'Callback', 'NoAnswer', 'Busy', 'GatekeeperOnly', 'WrongNumber', 'VoicemailLeft', 'OptOut'];\n\nconst body = $input.first().json.body;\nconst { callNote, disposition } = body;\n\nif (!callNote || typeof callNote !== 'string' || callNote.trim().length === 0) {\n  return [{ json: { valid: false, reason: 'Call Note is required and cannot be empty.' } }];\n}\n\nif (!DISPOSITIONS.includes(disposition)) {\n  return [{ json: { valid: false, reason: `Disposition is required and must be one of: ${DISPOSITIONS.join(', ')}.` } }];\n}\n\nreturn [{ json: { valid: true } }];"
+      },
+      "notes": "Same 9-value Disposition set as post-call-synthesis.workflow.json's (W3.4) structured-output schema, kept identical on purpose so a rep's manual entry and the AI's own QA guess are directly comparable. 'User is required to enter Disposition type... Basically Call Note, Disposition' - both are hard-required here; only the Callback/Try-back date-time is optional, and it isn't even validated (an empty scheduledAt just means 'no specific time given', handled downstream in attempt-recycling-matrix.workflow.json)."
+    },
+    {
+      "id": "e646828a-144b-482d-812d-328ceb7abc17",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-720, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b67d87d5-27e0-42bc-995d-b39469abef04",
+      "name": "Submit to attempt matrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/attempt-recycling",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ hopperEntryId: $('Call wrap-up webhook').item.json.body.hopperEntryId, opportunityId: $('Call wrap-up webhook').item.json.body.opportunityId, disposition: $('Call wrap-up webhook').item.json.body.disposition, attemptCountThisWave: $('Call wrap-up webhook').item.json.body.attemptCountThisWave, wave: $('Call wrap-up webhook').item.json.body.wave, lastAttemptDate: $('Call wrap-up webhook').item.json.body.lastAttemptDate, firstAttemptDateThisWave: $('Call wrap-up webhook').item.json.body.firstAttemptDateThisWave, attemptCountToday: $('Call wrap-up webhook').item.json.body.attemptCountToday, repId: $('Call wrap-up webhook').item.json.body.repId, scheduledAt: $('Call wrap-up webhook').item.json.body.scheduledAt || null }) }}",
+        "options": {}
+      },
+      "notes": "Calls the real attempt-recycling-matrix workflow (W3.3) by its webhook path, same pattern as referral-trigger.workflow.json calling alert-dispatch - this is where the rep's disposition actually decides and persists the HopperEntry's next state (RETRY_NOW/RECYCLE_NEXT_WAVE/CALLBACK_SCHEDULED/STOP/STOP_TO_REWORK)."
+    },
+    {
+      "id": "97e46a66-d059-4a60-b200-f02deec6d665",
+      "name": "Log call note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Call wrap-up webhook').item.json.body.opportunityId, type: 'CallNote', note: $('Call wrap-up webhook').item.json.body.callNote, repId: $('Call wrap-up webhook').item.json.body.repId, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Writes the rep's free-text Call Note to the Activity Event append-only timeline (CRM-OBJECT-MODEL.md), same target as dnc-check.workflow.json's override log - a call note is exactly the kind of per-touch record that timeline exists for. Fire-and-forget relative to 'Respond: wrap-up complete', same pattern as this library's other non-blocking writes."
+    },
+    {
+      "id": "a6a9b241-5724-4efe-be38-b9af67205b3c",
+      "name": "Has transcript?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-240, 160],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Call wrap-up webhook').item.json.body.transcriptOrNotes }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "AI QA enrichment (Summary/Rebuttal-flag/DM-Presence) only runs when a transcript or notes are actually available - a rep can complete wrap-up (Call Note + Disposition) without one, per the input contract, and this branch just does nothing in that case rather than calling W3.4 with nothing useful to synthesize."
+    },
+    {
+      "id": "2581b024-a5de-4b6a-8a44-390afe0e2405",
+      "name": "Trigger AI QA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 160],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/post-call-synthesis",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Call wrap-up webhook').item.json.body.opportunityId, callId: $('Call wrap-up webhook').item.json.body.hopperEntryId, transcriptOrNotes: $('Call wrap-up webhook').item.json.body.transcriptOrNotes }) }}",
+        "options": {}
+      },
+      "notes": "Calls post-call-synthesis.workflow.json (W3.4) fire-and-forget - it writes lastCallDispositionAiSuggested/lastCallSummary/lastCallRebuttalFlag/etc. onto the Opportunity as a QA layer, it does NOT own the authoritative Disposition anymore (that's the rep's own entry, already submitted via 'Submit to attempt matrix'). No separate 'callId' concept exists yet in this repo, so hopperEntryId is reused as a stand-in identifier - fine for W3.4's own purposes (it doesn't do anything with callId besides passing it through logs)."
+    },
+    {
+      "id": "ae75cf18-0e7e-4f6e-89cb-3fe361518eb6",
+      "name": "Respond: wrap-up complete",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-240, -180],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, hopperEntryResult: $('Submit to attempt matrix').item.json }) }}"
+      },
+      "notes": "This response IS the 'completion of this sequence selection triggers moving to the next call' signal Jonathan described - the dialer UI is expected to advance to the next call (or call hopper-request-next.workflow.json again) once it sees ok: true here, not before. Doesn't wait on 'Log call note' or 'Trigger AI QA' - both are fire-and-forget, consistent with this library's established non-blocking-write pattern."
+    },
+    {
+      "id": "a6091b4b-b22d-45e6-8151-b82b7c99de0e",
+      "name": "Respond: invalid submission",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-720, 160],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: $json.reason }) }}"
+      },
+      "notes": "Missing Call Note or an unrecognized/missing Disposition blocks here - the dialer UI must NOT be able to advance to the next call without a valid submission, since that's the entire point of this gate."
+    }
+  ],
+  "connections": {
+    "Call wrap-up webhook": {
+      "main": [[{ "node": "Validate submission", "type": "main", "index": 0 }]]
+    },
+    "Validate submission": {
+      "main": [[{ "node": "Valid?", "type": "main", "index": 0 }]]
+    },
+    "Valid?": {
+      "main": [
+        [{ "node": "Submit to attempt matrix", "type": "main", "index": 0 }],
+        [{ "node": "Respond: invalid submission", "type": "main", "index": 0 }]
+      ]
+    },
+    "Submit to attempt matrix": {
+      "main": [
+        [
+          { "node": "Log call note", "type": "main", "index": 0 },
+          { "node": "Has transcript?", "type": "main", "index": 0 },
+          { "node": "Respond: wrap-up complete", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Has transcript?": {
+      "main": [[{ "node": "Trigger AI QA", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

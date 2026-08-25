@@ -157,6 +157,7 @@ difficulty, so none of the brief's own six are lost.
 | W3.3 | Attempt/recycling matrix | Post-call, per attempt | Auto (internal scheduling logic) | **Scaffolded**, with the brief's actual numbers hard-coded (not placeholders) — `phase-3-dialer-hopper/attempt-recycling-matrix.workflow.json` |
 | W3.4 | Post-call synthesis (strict 4-key JSON, now 5-key) | Call disposition event | Auto (internal — produces structured data, not an external send) | **Scaffolded**, using Claude Structured Outputs for the brief's 4-key contract plus a 5th compliance key added this pass — `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
 | W3.5 | Pacing controller (new, not in the brief's own numbering) | Call outcome event, alongside W3.3/W3.4 | Auto (internal — no manual pacing control by anyone, per Jonathan's explicit choice) | **Scaffolded** — `phase-3-dialer-hopper/pacing-controller.workflow.json` |
+| W3.6 | Call wrap-up / required disposition gate (new, not in the brief's own numbering) | Rep action, right after each call | **Hard gate** — dialer can't advance to the next call without it | **Scaffolded** — `phase-3-dialer-hopper/call-wrap-up.workflow.json` |
 
 **Explicit correction already captured in the roadmap itself:** this phase is data/workflow layer
 only — no live call placement happens here (that's Phase 5, gated on Telnyx).
@@ -173,17 +174,22 @@ personal Callback first, else the oldest-wave shared-pool candidate), with an ex
 read-then-write race-condition risk (two reps could select the same entry before either claim lands)
 mitigated but not eliminated by a re-read-and-verify step. See `phase-3-dialer-hopper/README.md`.
 
-**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded two passes ago, extended since.** The
-attempt matrix's actual numbers are given by the brief (6 attempts no-answer, 4 busy, 8 gatekeeper,
-hard-stop on opt-out, 4-wave 90-120 day recycling) and post-call synthesis's exact output contract is
-given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence, enforced via Claude's
-Structured Outputs). **Last pass:** W3.3 gained a real PATCH persisting the resulting HopperEntry
-state, plus explicit `Callback` → `CALLBACK_SCHEDULED`/rep-locked handling; W3.4's Disposition enum
-swapped `Connected-CallbackRequested` for a plain top-level `Callback` value to match. **This pass:**
-W3.4 gained a 5th structured-output key, `Rebuttal After Decline` — the global no-rebuttal
-compliance policy's QA signal, written onto the Opportunity and, when true, fired as an internal
-alert through the real alert-dispatcher (W2.4) for a compliance reviewer. Both W3.3/W3.4 are wired to
-the real hopper (W3.1/W3.2) rather than waiting on it.
+**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded three passes ago, extended since.**
+Post-call synthesis's exact output contract is given by the brief (a strict 4-key JSON: Disposition,
+Summary, Try-Back Time, DM Presence, enforced via Claude's Structured Outputs). **Two passes ago:**
+W3.3 gained a real PATCH persisting the resulting HopperEntry state, plus explicit `Callback` →
+`CALLBACK_SCHEDULED`/rep-locked handling; W3.4's Disposition enum swapped `Connected-CallbackRequested`
+for a plain top-level `Callback` value to match. **Last pass:** W3.4 gained a 5th structured-output
+key, `Rebuttal After Decline` — the global no-rebuttal compliance policy's QA signal. **This pass,
+two real changes:** (1) W3.3's attempt matrix was rewritten wholesale — the brief's original 6/4/8-
+attempts-by-disposition-type, 4-wave, 90-120-day model is replaced by Jonathan's explicit two-wave
+cadence (wave 1: 7 attempts / 14 days back-to-back; wave 2, after a 14-day gap: 4 attempts / 3 days
+back-to-back; exhausting wave 2 parks the entry in a new `FutureRework` status rather than closing it
+out) plus a 2-attempts/day cap enforced at claim time (W3.1) for every non-Preview dialer mode; (2)
+the rep's own manually-entered Disposition (`call-wrap-up.workflow.json`, W3.6, new) is now
+authoritative — W3.4's AI-inferred Disposition write was renamed `lastCallDispositionAiSuggested` so
+it can no longer silently clobber the rep's entry, kept only as a QA cross-reference. All of W3.1/
+W3.3/W3.4/W3.6 are wired to the real hopper rather than waiting on it.
 
 **W3.5 (new, not in the brief's own numbering) — added this pass as the compliance layer's pacing
 half.** Per Jonathan's explicit choice, dialer pacing (simultaneous calls per agent, dial speed) is
@@ -192,6 +198,16 @@ watches a rolling abandonment rate per Campaign (the FTC TSR's 3% ceiling seeded
 target, flagged for counsel confirmation) and ratchets `currentAllowedSimultaneousCallsPerAgent`
 against it, capped at an admin-set `maxSimultaneousCallsPerAgentCeiling` — the only human lever, set
 once per Campaign, not adjusted call-by-call. See `phase-3-dialer-hopper/README.md`.
+
+**W3.6 (new, not in the brief's own numbering) — added this pass as the "required disposition to
+advance" gate.** Per Jonathan's explicit instruction, a rep must submit a Call Note and a Disposition
+(Callback/Try-back date-time optional) before the dialer moves to the next call, in Preview and every
+auto-dialer mode alike. Built as a real gate, not a UI convention: `hopper-request-next.workflow.json`
+(W3.1) now refuses to hand out a new HopperEntry to a rep who still holds one un-dispositioned, and
+this workflow is the only path that clears that hold — it validates the submission, feeds the rep's
+own disposition into W3.3 as the authoritative input, logs the Call Note to the Activity Event
+timeline, and fires W3.4 fire-and-forget for AI QA only when a transcript is actually available. See
+`phase-3-dialer-hopper/README.md`.
 
 ## Phase 4 — Intelligence Layer
 

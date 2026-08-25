@@ -11,7 +11,14 @@ import {
   postMessage,
   recordAlert,
   type D1Like,
+  type SubjectType,
 } from './db.js';
+
+const VALID_SUBJECT_TYPES: readonly SubjectType[] = ['lead', 'opportunity', 'location', 'company', 'organization'];
+
+function isSubjectType(value: string): value is SubjectType {
+  return (VALID_SUBJECT_TYPES as readonly string[]).includes(value);
+}
 
 const PAGE_STYLE = `
   body { font-family: -apple-system, system-ui, sans-serif; background: #0a1628; color: #eaf3fb;
@@ -155,15 +162,22 @@ export async function handlePostMessage(request: Request, db: D1Like, authorEmai
 
 export async function handleThreadPage(request: Request, db: D1Like): Promise<Response> {
   const url = new URL(request.url);
-  const opportunityId = url.searchParams.get('opportunityId') ?? '';
-  if (!opportunityId) return new Response('Missing ?opportunityId=', { status: 400 });
+  const subjectTypeRaw = url.searchParams.get('subjectType') ?? '';
+  const subjectId = url.searchParams.get('subjectId') ?? '';
+  if (!isSubjectType(subjectTypeRaw) || !subjectId) {
+    return new Response(
+      `Missing or invalid ?subjectType=&subjectId= (subjectType must be one of: ${VALID_SUBJECT_TYPES.join(', ')}).`,
+      { status: 400 },
+    );
+  }
+  const subjectType = subjectTypeRaw;
 
-  const thread = await getOrCreateThread(db, opportunityId);
+  const thread = await getOrCreateThread(db, subjectType, subjectId);
   const comments = await listComments(db, thread.id);
 
   const main = `
     <div class="card" style="grid-column: 1 / -1">
-      <h1>Comment thread — Opportunity ${escapeHtml(opportunityId)}</h1>
+      <h1>Comment thread — ${escapeHtml(subjectType)} ${escapeHtml(subjectId)}</h1>
       <div id="comments">
         ${
           comments.length
@@ -177,26 +191,38 @@ export async function handleThreadPage(request: Request, db: D1Like): Promise<Re
         }
       </div>
       <form class="compose" method="post" action="/messaging/threads/comments">
-        <input type="hidden" name="opportunityId" value="${escapeHtml(opportunityId)}">
+        <input type="hidden" name="subjectType" value="${escapeHtml(subjectType)}">
+        <input type="hidden" name="subjectId" value="${escapeHtml(subjectId)}">
         <input type="text" name="body" placeholder="Comment (use @name to mention)" required>
         <button type="submit">Comment</button>
       </form>
     </div>`;
 
-  return new Response(pageShell(`Thread — ${opportunityId}`, main, 'comments'), {
+  return new Response(pageShell(`Thread — ${subjectType} ${subjectId}`, main, 'comments'), {
     headers: { 'content-type': 'text/html; charset=utf-8' },
   });
 }
 
 export async function handlePostComment(request: Request, db: D1Like, authorEmail: string): Promise<Response> {
   const form = await request.formData();
-  const opportunityId = String(form.get('opportunityId') ?? '');
+  const subjectTypeRaw = String(form.get('subjectType') ?? '');
+  const subjectId = String(form.get('subjectId') ?? '');
   const body = String(form.get('body') ?? '');
+  if (!isSubjectType(subjectTypeRaw) || !subjectId) {
+    return new Response(`Invalid subjectType (must be one of: ${VALID_SUBJECT_TYPES.join(', ')}) or missing subjectId.`, {
+      status: 400,
+    });
+  }
+  const subjectType = subjectTypeRaw;
+
   try {
-    const thread = await getOrCreateThread(db, opportunityId);
+    const thread = await getOrCreateThread(db, subjectType, subjectId);
     await postComment(db, thread.id, authorEmail, body);
     return Response.redirect(
-      new URL(`/messaging/thread?opportunityId=${encodeURIComponent(opportunityId)}`, request.url).toString(),
+      new URL(
+        `/messaging/thread?subjectType=${encodeURIComponent(subjectType)}&subjectId=${encodeURIComponent(subjectId)}`,
+        request.url,
+      ).toString(),
       303,
     );
   } catch (err) {

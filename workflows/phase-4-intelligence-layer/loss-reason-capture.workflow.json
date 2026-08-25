@@ -65,7 +65,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Same Twenty CRM REST-shape uncertainty as every workflow in this library. These are the exact two fields the DNC-check workflow (phase-2-calendar-nurture-alerts/dnc-check.workflow.json) reads - keep both in sync if either field's name changes once checked against a real instance."
+      "notes": "Same Twenty CRM REST-shape uncertainty as every workflow in this library. These are the exact two fields the DNC-check workflow (phase-2-calendar-nurture-alerts/dnc-check.workflow.json) reads - keep both in sync if either field's name changes once checked against a real instance. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a Lost deal is a pre-sale/Opportunity-level event, so this correctly stays Opportunity-anchored - not moved to Location or Company."
     },
     {
       "id": "1d1b1248-5038-4d71-9c1a-8d349dc82d4d",

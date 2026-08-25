@@ -6,7 +6,7 @@
       "name": "Stripe webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-800, 0],
+      "position": [-1400, 0],
       "webhookId": "PLACEHOLDER_WEBHOOK_ID",
       "parameters": {
         "httpMethod": "POST",
@@ -23,18 +23,18 @@
       "name": "Verify signature & classify event",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-560, 0],
+      "position": [-1160, 0],
       "parameters": {
-        "jsCode": "const crypto = require('crypto');\nconst secret = $env.STRIPE_WEBHOOK_SECRET || 'PLACEHOLDER_STRIPE_WEBHOOK_SECRET';\nconst sigHeader = $input.first().json.headers['stripe-signature'] || '';\nconst rawBody = $input.first().json.body /* ASSUMES this is the raw string, per the rawBody option on the Stripe webhook node - not verified */;\n\nconst parts = Object.fromEntries(sigHeader.split(',').map((kv) => kv.split('=')));\nconst signedPayload = `${parts.t}.${rawBody}`;\nconst expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');\n\nlet valid = false;\ntry {\n  valid = crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(parts.v1 || '', 'hex'));\n} catch (e) {\n  valid = false; // length mismatch etc. - definitely not a valid signature\n}\n\nconst event = valid ? JSON.parse(rawBody) : null;\nconst RELEVANT_TYPES = ['checkout.session.completed', 'payment_intent.succeeded'];\n\nreturn [{\n  json: {\n    ok: valid,\n    handled: valid && RELEVANT_TYPES.includes(event?.type),\n    eventType: event?.type,\n    opportunityId: event?.data?.object?.metadata?.opportunityId,\n  },\n}];"
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.STRIPE_WEBHOOK_SECRET || 'PLACEHOLDER_STRIPE_WEBHOOK_SECRET';\nconst sigHeader = $input.first().json.headers['stripe-signature'] || '';\nconst rawBody = $input.first().json.body /* ASSUMES this is the raw string, per the rawBody option on the Stripe webhook node - not verified */;\n\nconst parts = Object.fromEntries(sigHeader.split(',').map((kv) => kv.split('=')));\nconst signedPayload = `${parts.t}.${rawBody}`;\nconst expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');\n\nlet valid = false;\ntry {\n  valid = crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(parts.v1 || '', 'hex'));\n} catch (e) {\n  valid = false; // length mismatch etc. - definitely not a valid signature\n}\n\nconst event = valid ? JSON.parse(rawBody) : null;\nconst RELEVANT_TYPES = ['checkout.session.completed', 'payment_intent.succeeded'];\n\n// Tier prices per portal/netlify/functions/lib/createCheckoutSession.ts's TIER_PRICES_CENTS -\n// reverse-looked-up from the paid amount rather than trusting a metadata field, since the portal\n// doesn't currently set a tier metadata key (only opportunityId) - avoids needing a second\n// coordinated change over there for this workflow to know what was actually purchased.\nconst TIER_PRICES_CENTS = { Gold: 75000, Platinum: 165000, Iridium: 260000 };\nconst amountTotal = event?.data?.object?.amount_total ?? event?.data?.object?.amount ?? null;\nconst tier = Object.keys(TIER_PRICES_CENTS).find((t) => TIER_PRICES_CENTS[t] === amountTotal) || 'Unknown';\n\nreturn [{\n  json: {\n    ok: valid,\n    handled: valid && RELEVANT_TYPES.includes(event?.type),\n    eventType: event?.type,\n    opportunityId: event?.data?.object?.metadata?.opportunityId,\n    amountTotalCents: amountTotal,\n    tier,\n  },\n}];"
       },
-      "notes": "Implements Stripe's documented signature scheme (t=timestamp,v1=hexHMAC over `${t}.${rawBody}` with the webhook secret) - the algorithm itself is stable public Stripe documentation, but this hasn't been tested against a real Stripe webhook delivery, and depends entirely on the previous node's raw-body assumption holding. ALSO ASSUMES the Checkout Session (or PaymentIntent) was created with metadata.opportunityId set to the Twenty CRM Opportunity ID, the same link-up pattern as the e-sign/Documenso workflow used for its externalId - that metadata has to be set wherever the Stripe payment link/Checkout Session actually gets created (the portal's Onboarding Form step, Netlify-hosted, not built in this repo)."
+      "notes": "Implements Stripe's documented signature scheme (t=timestamp,v1=hexHMAC over `${t}.${rawBody}` with the webhook secret) - the algorithm itself is stable public Stripe documentation, but this hasn't been tested against a real Stripe webhook delivery, and depends entirely on the previous node's raw-body assumption holding. ALSO ASSUMES the Checkout Session (or PaymentIntent) was created with metadata.opportunityId set to the Twenty CRM Opportunity ID - portal/netlify/functions/create-checkout-session.mts sets this already. Tier is reverse-derived from the paid amount against the brief's own known tier prices (Gold/Platinum/Iridium) - 'Unknown' for anything that doesn't match exactly (e.g. Rhodium's custom pricing), which downstream nodes should treat as a signal to flag for human review, not silently proceed as if it were a known tier."
     },
     {
       "id": "06641884-801d-43ee-9a78-cf0475ae6425",
       "name": "Signature valid?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-320, 0],
+      "position": [-920, 0],
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
@@ -56,7 +56,7 @@
       "name": "Relevant event type?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-80, -100],
+      "position": [-680, -160],
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
@@ -74,17 +74,14 @@
       }
     },
     {
-      "id": "e37bd535-ced2-4cc0-b793-3453bd08f2ee",
-      "name": "Advance CRM to Live Client",
+      "id": "fc954e30-e230-42c2-9371-57174d7b4aeb",
+      "name": "Fetch Opportunity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [160, -160],
+      "position": [-440, -280],
       "parameters": {
-        "method": "PATCH",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.opportunityId }}",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ stage: 'Live Client', paymentStatus: 'Paid', onboardingProvisioningStatus: 'Pending' }) }}",
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Verify signature & classify event').item.json.opportunityId }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -93,14 +90,135 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "brief v2 / 05 Section 7 phrases this as one webhook advancing 'Contract Signed -> Onboarding -> Live Client' - ASSUMPTION FLAGGED: this workflow jumps straight to 'Live Client' on payment success rather than pausing at an intermediate 'Onboarding' stage, since the brief doesn't specify a reason to wait once payment clears. If a real intermediate step needs to happen first (e.g. W6.3's onboarding provisioning automation, documented-only/not built), reconsider staging this as Onboarding here and a *second* stage-advance once provisioning actually completes - 'onboardingProvisioningStatus: Pending' is included specifically so that later automation has something to update rather than this workflow silently claiming provisioning is done when it isn't. Same Twenty CRM REST-shape uncertainty as every other workflow here."
+      "notes": "NEW (object model migration, CRM-OBJECT-MODEL.md): reads the Opportunity's locationIds and companyName so the Company/Contract creation below has real data to work from, rather than guessing. This is where the funnel object (Opportunity) hands off to the client-relationship object (Company/Contract) - the single most structurally significant change in this pass."
+    },
+    {
+      "id": "5c382c54-9cef-43e1-90ce-3e14e6146a9a",
+      "name": "Create Company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, -280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: ($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).companyName, status: 'LiveClient', liveClientSince: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "NEW-LOGO PATH ONLY, deliberately: always creates a fresh Company rather than searching for an existing one first. An existing Company adding a Location/changing tier is Contract Amendment Flow (05 Section 13, 06's new addition) - explicitly Step 2/3 work per the agreed sequencing, NOT built this pass. If this workflow ever fires for an existing client (shouldn't happen via the new-logo Stripe Checkout flow, but worth stating), it will incorrectly create a duplicate Company - flagged here rather than silently handled, since building real dedup logic without Contract Amendment Flow existing yet would be guessing at half a solution."
+    },
+    {
+      "id": "796997a0-ae5b-4dfb-8111-61e26564ee6f",
+      "name": "Create Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, -280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companyId: $('Create Company').item.json.id, locationIds: ($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).locationIds, status: 'Active', totalValue: $('Verify signature & classify event').item.json.amountTotalCents, agreementValue: $('Verify signature & classify event').item.json.amountTotalCents, tier: $('Verify signature & classify event').item.json.tier, startedAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Mirrors the winning Opportunity's Location set, per 05 Section 7 ('all Locations on the Contract reach Won together') and CRM-OBJECT-MODEL.md's Contract object. totalValue/agreementValue both set to the paid amount for now - the brief distinguishes the two concepts (contract value vs. what's actually been agreed/collected) without fully specifying how they'd differ in a single-payment M2M scenario; worth revisiting once a multi-payment or discounted-term scenario exists to actually differentiate them."
+    },
+    {
+      "id": "6235450c-8fd2-4355-b95b-7d1121b142b6",
+      "name": "Split Locations",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [280, -400],
+      "parameters": {
+        "fieldToSplitOut": "locationIds"
+      },
+      "notes": "Fans the Contract's locationIds array out into one item per Location, same node type/pattern already used in referral-trigger.workflow.json. This branch is fire-and-forget relative to the HTTP response below (see 'Update Location contractStatus' notes) - deliberately not merged back into the main response chain, to avoid a second uncertain Merge node in an already-complex workflow."
+    },
+    {
+      "id": "5ccc24b7-aad1-4ae7-b261-5a6d97f639c9",
+      "name": "Update Location contractStatus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -400],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.locationIds }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contractStatus: 'ActiveM2M', companyId: $('Create Company').item.json.id }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "ASSUMES month-to-month (ActiveM2M) rather than a fixed term (ActiveTerm) - Stripe Checkout Session data alone doesn't distinguish these without a real subscription/price-object lookup, which isn't built. Runs once per Location (via Split Locations above) and intentionally doesn't feed back into the main response chain - if this PATCH fails for one Location, the webhook still responds 200 to Stripe (correct - Stripe doesn't care about internal CRM consistency) but the failure needs to surface via this workflow's errorWorkflow alert, not a failed HTTP response. This is exactly the Location Contract Lock field (CRM-OBJECT-MODEL.md) - the enforcement workflow that actually BLOCKS a conflicting new Opportunity is Step 2/3, not built this pass; this node only makes sure the field gets set correctly so that enforcement has real data once it exists."
+    },
+    {
+      "id": "db078440-f2e2-449a-bc22-3f425a25556f",
+      "name": "Create Billing Period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, -280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contractId: $('Create Contract').item.json.id, periodStart: new Date().toISOString(), periodEnd: new Date(Date.now() + 30*24*60*60*1000).toISOString(), revenueCents: $('Verify signature & classify event').item.json.amountTotalCents, commissionStatus: 'accrued' }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "NEW (05 Section 15, Financial Tracking - new in v4): only the FIRST Billing/Accounting Period, created here so nothing downstream has to special-case 'no billing period yet exists' the moment a client goes live. The recurring MONTHLY generation for every subsequent period, the COGS breakdown (voice/STT/TTS/API costs - needs real per-client usage data this repo doesn't have anywhere yet), and commission calculation/approval are all Step 2/3 work, not built this pass. periodEnd is a naive +30 days, not calendar-month-aware - a real implementation should probably use actual month boundaries; flagged as a simplification, not a considered decision."
+    },
+    {
+      "id": "e37bd535-ced2-4cc0-b793-3453bd08f2ee",
+      "name": "Advance Opportunity to Won",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -280],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Verify signature & classify event').item.json.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Won', paymentStatus: 'Paid', onboardingProvisioningStatus: 'Pending', companyId: $('Create Company').item.json.id, contractId: $('Create Contract').item.json.id }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "RENAMED from 'Live Client' to 'Won', matching 05 Section 7's own literal wording ('all Locations on the Contract reach Won together') - 'Live Client' was this workflow's own earlier invention before the object model existed; the ongoing-client status now belongs on the Company (set 'LiveClient' by the Create Company node above), not the Opportunity, per CRM-OBJECT-MODEL.md's load-bearing pre-sale/post-sale distinction. onboardingProvisioningStatus:'Pending' kept from the previous version - W6.3's onboarding provisioning automation is still documented-only, not built. Same Twenty CRM REST-shape uncertainty as every workflow here."
     },
     {
       "id": "753bb0b4-3a29-49e8-80eb-c862d24197ca",
       "name": "Respond: handled",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [400, -160],
+      "position": [760, -280],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ ok: true, handled: true }) }}"
@@ -111,7 +229,7 @@
       "name": "Respond: ignored (valid, not relevant)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [160, 40],
+      "position": [-440, -40],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ ok: true, handled: false }) }}"
@@ -123,7 +241,7 @@
       "name": "Respond: invalid signature",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [-80, 160],
+      "position": [-680, 160],
       "parameters": {
         "respondWith": "json",
         "responseCode": 403,
@@ -146,11 +264,31 @@
     },
     "Relevant event type?": {
       "main": [
-        [{ "node": "Advance CRM to Live Client", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Opportunity", "type": "main", "index": 0 }],
         [{ "node": "Respond: ignored (valid, not relevant)", "type": "main", "index": 0 }]
       ]
     },
-    "Advance CRM to Live Client": {
+    "Fetch Opportunity": {
+      "main": [[{ "node": "Create Company", "type": "main", "index": 0 }]]
+    },
+    "Create Company": {
+      "main": [[{ "node": "Create Contract", "type": "main", "index": 0 }]]
+    },
+    "Create Contract": {
+      "main": [
+        [
+          { "node": "Split Locations", "type": "main", "index": 0 },
+          { "node": "Create Billing Period", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Split Locations": {
+      "main": [[{ "node": "Update Location contractStatus", "type": "main", "index": 0 }]]
+    },
+    "Create Billing Period": {
+      "main": [[{ "node": "Advance Opportunity to Won", "type": "main", "index": 0 }]]
+    },
+    "Advance Opportunity to Won": {
       "main": [[{ "node": "Respond: handled", "type": "main", "index": 0 }]]
     }
   },

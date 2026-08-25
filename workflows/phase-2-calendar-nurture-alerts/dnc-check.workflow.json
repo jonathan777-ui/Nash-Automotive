@@ -105,7 +105,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Writes to the Activity Event timeline from CRM Architecture §13 - the append-only log an override like this has to land in for 'logged admin override' to mean anything. Endpoint/shape is this workflow's own reasonable guess at how Activity Event gets written to, not confirmed - it's a newer concept in §13 with no worked API example."
+      "notes": "Writes to the Activity Event timeline from CRM Architecture §13 - the append-only log an override like this has to land in for 'logged admin override' to mean anything. Endpoint/shape is this workflow's own reasonable guess at how Activity Event gets written to, not confirmed - it's a newer concept in §13 with no worked API example. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): restrictionReason is checked/logged against the Opportunity, consistent with post-loss routing staying a pre-sale/deal-level concept, not moved to Location or Company."
     },
     {
       "id": "83f9286b-e324-4ecb-8b53-2073f2f06038",

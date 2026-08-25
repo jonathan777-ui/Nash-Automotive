@@ -8,10 +8,11 @@ schema, neither of which is specified yet).
 
 ## W1.1 — `lead-intake-to-demo-dashboard.workflow.json`
 
-Webhook (lead intake) → normalize the payload → **fire Deep Dive Research and Front Door Audit in
-parallel** (per the Launch Checklist's explicit "parallel Deep Dive Research + Front Door Audit"
-build step — both branch off the same normalize node, not chained) → merge the two results → write
-onto the Twenty CRM Opportunity with stage `Demo Queue`.
+Webhook (lead intake) → normalize the payload → **resolve or create a Location** (GBP/website-keyed
+— new this pass, see below) → **fire Deep Dive Research and Front Door Audit in parallel** (per the
+Launch Checklist's explicit "parallel Deep Dive Research + Front Door Audit" build step) → merge the
+two results → write Front Door Audit onto the **Location**, Deep Dive Research + stage `Demo Queue`
+onto the **Opportunity**.
 
 **Front Door Audit is new in this version and not built anywhere in this repo.** The brief names its
 output shape (a score, a rebuild target, a point lift, across "10 weighted categories") but not what
@@ -21,29 +22,48 @@ named placeholder URL, flagged clearly rather than guessed. Both should most lik
 dedicated Node/TS services (per the brief's own "standalone service, not n8n Code nodes"
 architecture principle, already applied to the demo generator), once their contracts are decided.
 
-**CRM write corrected for the new CRM Architecture section (05 §13).** An earlier version of this
+**CRM write corrected for the CRM Architecture section (05 §13).** An earlier version of this
 workflow dumped the full Deep Dive Research response into a CRM field — that directly violates the
-Opportunity Card UX principle now documented explicitly ("a status badge + button opening the actual
-tool in a new tab... no embedded tools or inline live data inside the CRM itself; it references, it
-doesn't host"). Fixed to write status fields + link-out report URLs instead.
+Opportunity Card UX principle ("a status badge + button opening the actual tool in a new tab... no
+embedded tools or inline live data inside the CRM itself; it references, it doesn't host"). Fixed to
+write status fields + link-out report URLs instead.
 
-**Assumptions flagged, not silently made:** that "Demo Dashboard" is a view over Twenty CRM
-Opportunity stages rather than a separate system (more directly supported now by §13's "single
-Opportunity object... managed from the Company Card"); that the lead-intake caller posts the
-specific field names this workflow expects; and that a Merge node joins the two parallel branches
-(its exact parameter shape is the most version-sensitive part of this workflow — see the node's own
-`notes`).
+**Object model migration (this pass, per `CRM-OBJECT-MODEL.md`):** Front Door Audit moved off the
+Opportunity onto a Location — audits are inherently per-site, and an Opportunity spanning multiple
+Locations needs an independent audit result for each, which a single Opportunity field couldn't
+represent. This required adding a real Location resolve-or-create step (search by `gbpUrl`, fall
+back to creating one) before the parallel research calls, so there's somewhere real to write the
+audit result to. Deep Dive Research and the `Demo Queue` stage stayed on the Opportunity — see
+`CRM-OBJECT-MODEL.md`'s anchor-decision table for the reasoning per field.
+
+**Assumptions flagged, not silently made:** that the lead-intake caller posts the specific field
+names this workflow expects (now including `gbpUrl`, separate from `websiteUrl`); that a Merge node
+joins the two parallel research branches (its exact parameter shape is the most version-sensitive
+part of this workflow — see the node's own `notes`); and that this workflow's caller has already
+created the Opportunity (it resolves/creates the Location, not the Opportunity itself).
 
 ## W1.2 — `demo-generation-trigger.workflow.json`
 
-Unchanged by brief v2. The one workflow in this library calling a **real, already-built,
-already-tested** contract: this repo's own `src/server/` `POST /generate-demo` (checkpoint 5).
-Webhook → call the demo generator → branch on `ok` → advance the Opportunity to `Pending Demos` on
-success, or fire an alert on failure. Already fits the Opportunity Card principle as-is (writes a
-status field only); a `demoSiteUrl` link-out field is a natural addition once a real demo-hosting
-URL exists (not yet, per root README's "Next" section).
+The one workflow in this library calling a **real, already-built, already-tested** contract: this
+repo's own `src/server/` `POST /generate-demo` (checkpoint 5). Webhook → call the demo generator →
+branch on `ok` → advance the Opportunity to `Pending Demos` and write demo status to the target
+Location on success, or fire an alert on failure.
 
-## W1.3 — `portal-esign-submitted.workflow.json` *(replaces the old Documenso-based workflow)*
+**Object model migration (this pass):** demo generation is inherently per-Location (one GBP/business
+per call to `/generate-demo`), so demo status now writes there, not just the Opportunity — the
+triggering payload needs a `locationId` alongside `opportunityId` now. **Also fixed a real bug found
+while making this change**: the CRM-write nodes previously read `$json.body.opportunityId`, but
+`$json` at that point is the demo generator's own response (`{ok, unifiedKb, stepUsed}` or `{ok,
+stage, reason}`), which has no `.body` field at all — that expression was always `undefined`. Fixed
+to reference the original webhook trigger node directly, the same pattern the alert node already
+used correctly. A `demoSiteUrl` link-out field on the Location is a natural addition once a real
+demo-hosting URL exists (not yet, per root README's "Next" section).
+
+## W1.4 — `portal-esign-submitted.workflow.json` *(replaces the old Documenso-based workflow)*
+
+*(Was mislabeled "W1.3" in an earlier version of this file — W1.3 is Proposal delivery, still
+documented-only, cataloged in `workflows/README.md` not here. Fixed while reviewing this file for
+the object model migration.)*
 
 **Brief v2 change:** MVP e-sign is no longer Documenso — it's a lightweight inline capture (typed
 name + checkbox + timestamp + IP) built directly into the Proposal page of the portal. Documenso
@@ -57,12 +77,16 @@ it doesn't run into the Opportunity Card "no embedded data" principle the way ra
 would. Responds synchronously (`responseNode`, not `onReceived`) since the portal's own JS needs to
 know whether the sign was recorded before unlocking the Onboarding Form.
 
+**CONFIRMED unchanged by the object model migration** (`CRM-OBJECT-MODEL.md`): e-sign is a pre-sale
+event on the deal itself, so it correctly stays Opportunity-anchored — not moved to Company, unlike
+what happens a few steps later once payment clears (see W1.6 below).
+
 **Assumes the portal posts to n8n rather than writing to Twenty CRM directly** — consistent with the
 brief's "single choke point through n8n" pattern used elsewhere, but not explicitly stated for this
 specific write; worth confirming once the portal's own architecture is decided (not built in this
 repo — see `workflows/README.md`'s Portal status).
 
-## W1.4 — `stripe-payment-to-crm.workflow.json` *(new)*
+## W1.6 — `stripe-payment-to-crm.workflow.json`
 
 **Brief v2 change:** Stripe is no longer deferred to Phase 5 — "no verification-queue blocker like
 Telnyx has, so no reason to defer the build itself." Built now with placeholder credentials
@@ -74,18 +98,38 @@ Stripe webhook → **verify the signature** (a Code node implementing Stripe's d
 — the algorithm itself is stable, but this is the single riskiest node in the whole library: it
 depends on the webhook node actually exposing the *raw* request body, which is genuinely uncertain
 for this n8n version; see the node's own `notes` for a safer architectural fallback if it doesn't
-work as written) → classify the event type → advance the Opportunity straight to `Live Client` on a
-completed payment, or respond 200-but-unhandled for any other Stripe event (per Stripe's own
-guidance, to avoid unnecessary retries).
+work as written) → classify the event type → **create the Company, create a Contract mirroring the
+Opportunity's Locations, set each Location `Active`, create the first Billing/Accounting Period,
+advance the Opportunity to `Won`** — or respond 200-but-unhandled for any other Stripe event (per
+Stripe's own guidance, to avoid unnecessary retries).
 
-**Assumption flagged, not silently made:** the brief phrases this as one webhook advancing "Contract
-Signed → Onboarding → Live Client," but doesn't specify why an intermediate Onboarding pause would
-be needed once payment clears — this workflow jumps straight to `Live Client`, writing
-`onboardingProvisioningStatus: 'Pending'` so the actual provisioning automation (W6.3, documented-
-only, not built) has something to update rather than this workflow silently claiming provisioning
-is done. Also assumes the Checkout Session/PaymentIntent was created with `metadata.opportunityId`
-set — that has to happen wherever the Stripe payment link actually gets created (the portal's
-Onboarding Form step, not built in this repo).
+**Object model migration (this pass) — the single most structurally significant change in this
+library.** This workflow is where the pre-sale funnel object (Opportunity) hands off to the
+client-relationship object (Company/Contract), per `CRM-OBJECT-MODEL.md`'s load-bearing distinction.
+What changed:
+- The terminal Opportunity stage is renamed from an earlier, invented "Live Client" to the brief's
+  own literal wording: "all Locations on the Contract reach **Won** together" (`05 §7`).
+- "Live Client" as a *concept* didn't disappear — it moved to the Company (`status: 'LiveClient'`),
+  since that's the object that actually represents an ongoing client relationship post-sale. This is
+  what fixed W4.3's (referral trigger) dangling query — see that workflow's own notes.
+- A Contract is created on the new Company, mirroring the winning Opportunity's `locationIds`, and
+  each of those Locations gets `contractStatus: 'ActiveM2M'` — this is the exact field Location
+  Contract Lock will check once its enforcement workflow is built (not this pass).
+- A first Billing/Accounting Period record is created (`05 §15`, new in v4) so nothing downstream
+  has to special-case "no billing period yet" the moment a client goes live. Recurring monthly
+  generation, COGS breakdown, and commission calculation are explicitly not built this pass.
+- **New-logo path only.** This workflow always creates a fresh Company — an existing Company adding
+  a Location or changing tier is Contract Amendment Flow (`05/06`, new in v4), explicitly scoped as
+  Step 2/3 work, not built here. If this ever fires for an existing client, it will incorrectly
+  create a duplicate Company; flagged in the node's own `notes` rather than silently handled.
+- Tier is now reverse-derived from the paid amount against the brief's own known tier prices, since
+  the portal doesn't currently pass a `tier` field in Stripe metadata (only `opportunityId`) —
+  avoided a second coordinated change to `portal/` for this.
+
+**Still true from before:** assumes the Checkout Session/PaymentIntent was created with
+`metadata.opportunityId` set — `portal/netlify/functions/create-checkout-session.mts` does this
+already, confirmed unaffected by the object model migration (checkout still happens pre-sale, so
+`opportunityId` is still the right thing to carry).
 
 ## Shared caveats across all four
 

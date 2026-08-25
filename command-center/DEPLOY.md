@@ -187,7 +187,9 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
 1. Visit `/messaging` through Access — create a channel, post a message with an `@mention`, confirm
    it renders (the mention highlighted, the message showing up without a manual page refresh within
    ~5 seconds).
-2. Visit `/messaging/thread?opportunityId=test-123` — post a comment, confirm it persists on reload.
+2. Visit `/messaging/thread?subjectType=opportunity&subjectId=test-123` — post a comment, confirm
+   it persists on reload. Try `subjectType=location` too — threads are keyed by (subjectType,
+   subjectId) together, so the same id under a different subject type is a different thread.
 3. `curl -X POST https://<your-worker>/api/alerts -H "Authorization: Bearer <wrong>" -d '{}'` should
    `401`. With the correct secret and a valid body (`{"severity":"info","source":"test","message":"hi"}`)
    it should `200`, and the alert should show up in `/messaging`'s sidebar.

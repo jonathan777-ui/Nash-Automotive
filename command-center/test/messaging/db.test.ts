@@ -80,17 +80,24 @@ describe('listMessages', () => {
 
 describe('getOrCreateThread', () => {
   it('returns the existing thread without inserting when one already exists', async () => {
-    const db = new FakeD1([{ results: [{ id: 't1', opportunityId: 'opp-1', createdAt: 'x' }] }]);
-    const thread = await getOrCreateThread(db, 'opp-1');
+    const db = new FakeD1([{ results: [{ id: 't1', subjectType: 'opportunity', subjectId: 'opp-1', createdAt: 'x' }] }]);
+    const thread = await getOrCreateThread(db, 'opportunity', 'opp-1');
     expect(thread.id).toBe('t1');
     expect(db.calls.some((c) => c.sql.includes('INSERT INTO comment_threads'))).toBe(false);
   });
 
   it('creates a new thread when none exists yet', async () => {
     const db = new FakeD1([{ results: [] }]);
-    const thread = await getOrCreateThread(db, 'opp-2');
-    expect(thread.opportunityId).toBe('opp-2');
+    const thread = await getOrCreateThread(db, 'opportunity', 'opp-2');
+    expect(thread.subjectId).toBe('opp-2');
     expect(db.calls.some((c) => c.sql.includes('INSERT INTO comment_threads'))).toBe(true);
+  });
+
+  it('keys threads by subject type as well as id — a location and an opportunity can share an id namespace safely', async () => {
+    const db = new FakeD1([{ results: [] }]);
+    await getOrCreateThread(db, 'location', 'loc-1');
+    const insertCall = db.calls.find((c) => c.sql.includes('INSERT INTO comment_threads'));
+    expect(insertCall?.params).toEqual([expect.any(String), 'location', 'loc-1', expect.any(String)]);
   });
 });
 

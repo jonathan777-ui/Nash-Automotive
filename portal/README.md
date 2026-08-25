@@ -8,8 +8,10 @@ is a small enough site not to need one).
 
 ## Pages (`public/`)
 
-- `audit.html` — Page 0.5, the Front Door Audit "proof, not pitch" page. Renders the score once
-  `frontDoorAuditStatus` is `Complete` on the Opportunity, or a pending state otherwise.
+- `audit.html` — Page 0.5, the Front Door Audit "proof, not pitch" page. Renders one card per
+  Location the Opportunity spans (an Opportunity can cover more than one GBP-driven site, per
+  `CRM-OBJECT-MODEL.md` — updated this pass, was a single flat score before), each showing that
+  site's own score once its `frontDoorAuditStatus` is `Complete`, or a pending state otherwise.
 - `proposal.html` — package/tier selection + the lightweight inline e-sign capture (typed name +
   checkbox; timestamp and IP are captured **server-side**, not trusted from the browser).
 - `onboarding.html` — a Stripe Checkout redirect flow (fully functional against Stripe, using
@@ -32,8 +34,12 @@ behavior is testable without needing a live Netlify environment.
 
 - **`get-opportunity`** (`GET /api/opportunity?id=...`) — the only way the portal pages read Twenty
   CRM data, because `TWENTY_CRM_API_KEY` can never reach the browser. Returns only the fields the
-  portal needs to render (company name, stage, Deep Dive Research / Front Door Audit status + link),
-  never the raw CRM record.
+  portal needs to render (company name, stage, Deep Dive Research status + link, and an array of
+  `locations`, each with its own Front Door Audit status/score/link and demo status), never the raw
+  CRM record. **Object model migration (this pass):** fetches the Opportunity, then fetches each of
+  its `locationIds` from `/rest/locations/{id}` — best-effort per Location (one failed Location fetch
+  doesn't fail the whole page). Was a single flat Opportunity-level audit result before Location
+  existed as its own object.
 - **`submit-esign`** (`POST /api/esign`) — validates the signature payload server-side (mirroring
   `workflows/phase-1-mvp/portal-esign-submitted.workflow.json`'s own check), captures the real
   timestamp and IP itself, and forwards to that n8n webhook. **Assumes the portal posts to n8n

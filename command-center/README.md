@@ -82,24 +82,38 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   `uncertain` fields and their comments in `src/vendors.ts` for specifics — worth checking against
   reality during the checkpoint-3 walkthrough rather than assuming the guess is right.
 
-## Piece 2 — Internal Team Messaging (05 §14), built this pass
+## Piece 2 — Internal Team Messaging (05 §14)
 
-Per brief v2's new `05 - Exhaustive Workflow & Automation Library` §14: channel-based chat,
-@mentions, comment threads attached to CRM records, and in-app delivery of the same alerts
-`workflows/phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json` sends to Google Chat.
-Explicitly scoped as lower-priority/not-urgent in the brief — built anyway once asked, on the same
-"code it now, activate on real credentials" discipline as everything else here.
+Per brief v2's `05 - Exhaustive Workflow & Automation Library` §14: channel-based chat, @mentions,
+comment threads attached to CRM records, and in-app delivery of alerts. Explicitly scoped as
+lower-priority/not-urgent in the brief — built anyway once asked, on the same "code it now, activate
+on real credentials" discipline as everything else here.
+
+**Status after the v4 review (`06 - Recent Changes Summary`):** the foundation (D1 schema, auth
+routing, polling UI) holds up, but the first pass was built against Opportunity-only anchoring and a
+free-form channel model, both of which v4 supersedes. Jonathan's requested sequence: object model
+first (this pass), then fix the alert-surface priority inversion, then the fixed 11-channel
+taxonomy, then rebuild Tag-for-Action properly — see `CRM-OBJECT-MODEL.md` and
+`workflows/README.md` for the full comparison and plan.
 
 - `src/messaging/db.ts` — all reads/writes against a **real, already-provisioned Cloudflare D1
   database** (`orbit-command-center-messaging`, created directly via the Cloudflare MCP tools during
   this build, same as the `STATUS` KV namespace was — not a placeholder). Schema: `channels`,
   `messages`, `mentions`, `comment_threads`, `comments`, `alerts`.
+- **`comment_threads` migrated to polymorphic subjects this pass** — `subjectType` (`lead` /
+  `opportunity` / `location` / `company` / `organization`) + `subjectId`, replacing the
+  Opportunity-only `opportunityId` column, per Communications Hub's explicit polymorphism in §13.
+  The live D1 table was empty (nothing deployed yet), so this was a clean drop-and-recreate, not a
+  data migration — confirmed via a row count before touching it.
 - `src/messaging/mentions.ts` — parses `@handle` mentions out of message/comment text. Not resolved
   against a real Workspace directory (none exists in this system yet) — a mention is stored as the
-  literal typed handle; matching it to a real person's notification is follow-up work.
+  literal typed handle; matching it to a real person's notification is follow-up work. **Note:**
+  this is cosmetic highlighting only, not Tag-for-Action (§14's actual mechanism — autocomplete,
+  action button, Activity Event log, human-to-AI gate) — flagged in the v4 comparison as the wrong
+  shape to grow from; Tag-for-Action gets rebuilt separately, not extended from this.
 - `src/messaging/routes.ts` — the HTTP handlers + server-rendered HTML (channel list, message
   thread with lightweight polling for a "feels live" update without a full page reload, a comment
-  thread page keyed by `?opportunityId=`, and a recent-alerts panel).
+  thread page keyed by `?subjectType=&subjectId=`, and a recent-alerts panel).
 - New routes wired into `src/index.ts`: `GET/POST /messaging`, `GET/POST /messaging/thread`,
   and `POST /api/alerts`. That last one is deliberately **not** behind Cloudflare Access — n8n's
   alert-dispatcher workflow calls it machine-to-machine and can't complete an interactive Access
@@ -107,19 +121,23 @@ Explicitly scoped as lower-priority/not-urgent in the brief — built anyway onc
   (`ALERTS_INGEST_SECRET`, a plain Wrangler secret like `CF_API_TOKEN` — never in Secrets Store or
   `wrangler.toml`, since that's the credential this Worker uses to *receive* pushes, not one a human
   submits through the form). Until that secret is set for real, `/api/alerts` returns 401 on every
-  request rather than silently accepting unauthenticated writes.
-- 19 tests (`command-center/npm test`) against a fake D1 (records calls, returns queued results —
+  request rather than silently accepting unauthenticated writes. **Still uses the old
+  {severity, source, message} shape** — no deep-link/action-button fields yet; that's Step 3
+  (alert-surface priority fix) and Step 4 (channel routing), not this pass.
+- 20 tests (`command-center/npm test`) against a fake D1 (records calls, returns queued results —
   same pattern as the `fakeClient()` mocks used for Anthropic calls elsewhere in this repo), plus
   the alerts-ingest auth logic specifically (rejects a missing/wrong/placeholder secret).
 
+**Known backwards priority, not yet fixed (Step 3, next):** `05 §11` states Command Center messaging
+is the *primary* alert surface (actionable buttons, deep-link to exact action) and Google Chat is
+*secondary* (external-visibility-only). The alert-dispatcher workflow currently treats them as
+roughly parallel targets. Fixing this is explicitly queued as the next step, not done here.
+
 **Not built:** real-time push (WebSocket via a Durable Object) — the message/comment views poll
 every 5s instead, which is simple, testable, and good enough for a "not urgent" internal tool; a
-natural v2 upgrade if it ever needs to feel more instant. Also not built: wiring an actual link to
-a comment thread onto a Twenty CRM Opportunity Card (per §13's "status badge + button opening the
-actual tool in a new tab" pattern) — the thread page itself is ready at a stable URL
-(`/messaging/thread?opportunityId=...`), but nothing yet writes that URL onto the Opportunity; a
-one-line addition to `workflows/phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` once
-that's wanted.
+natural v2 upgrade if it ever needs to feel more instant. The fixed 11-channel taxonomy (Step 4) and
+Tag-for-Action (Step 5) — see `workflows/README.md`'s Internal Team Messaging section for the full
+staged plan.
 
 Pipeline visibility/reporting and system health (the rest of Piece 2, absorbing Phase 6's W6.1)
 remain not started — lower priority, no brief-v2 urgency behind them the way messaging had.

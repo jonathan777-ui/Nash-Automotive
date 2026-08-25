@@ -16,17 +16,26 @@ available from this sandbox.
 
 ## W4.3 — `referral-trigger.workflow.json`
 
-Structurally complete, but built against **two named-placeholder thresholds**
+**Object model migration (this pass) — this one was a real bug, not a style fix.** Previously queried
+Opportunities filtered to `stage=LiveClient` — but `LiveClient` is a post-sale state that
+Opportunities no longer reach at all once the object model migration landed (W1.6 now advances
+Opportunities to `Won`, and `LiveClient` moved to the Company as a `status` field instead). That
+query would have silently returned zero results forever. Fixed to query Companies
+(`status=LiveClient`) instead — see `CRM-OBJECT-MODEL.md`'s load-bearing pre-sale/post-sale
+distinction for why every post-sale automation (this one, plus W4.1/W4.2/W4.5 once built) belongs on
+Company, not Opportunity.
+
+Structurally complete otherwise, but built against **two named-placeholder thresholds**
 (`PLACEHOLDER_REFERRAL_TENURE_DAYS`, `PLACEHOLDER_REFERRAL_ENGAGEMENT_THRESHOLD`) rather than real
 numbers — the brief says "tenure + engagement signal" but never gives the actual cutoffs, same
 treatment as every other undecided-but-not-blocking value throughout this repo (Telnyx/Stripe
 credentials, the alert channel routing rule). Set real values once decided; nothing else about this
 workflow changes.
 
-**Depends on `engagementScore` existing on the Opportunity**, which is W4.1's job (health/usage
-scoring — not built, blocked on the scoring formula itself being undecided). Until W4.1 exists, this
-workflow has nothing real to filter on even with the thresholds set — flagged in the node's own
-`notes`, not just here.
+**Depends on `engagementScore` existing on the Company**, which is W4.1's job (health/usage scoring —
+not built, blocked on the scoring formula itself being undecided; also needs migrating to Company
+once built, same reasoning as this workflow). Until W4.1 exists, this workflow has nothing real to
+filter on even with the thresholds set — flagged in the node's own `notes`, not just here.
 
 Only auto-flags eligibility and alerts a rep (via the real `alert-dispatcher` webhook, W2.4) — per
 the automation risk boundary, actually asking a client for a referral is an external send and stays

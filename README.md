@@ -16,19 +16,27 @@ the project brief's build order:
 - **`workflows/`** — the n8n automation library tying the whole pipeline together end to end
   (lead intake, CRM writes, alerts, nurture, the dialer, and everything else the brief names). See
   `workflows/README.md`.
+- **`CRM-OBJECT-MODEL.md`** — the canonical CRM object hierarchy (Lead → Opportunity → Location →
+  Company → Organization, plus Contract and Billing/Accounting Period) every piece above anchors
+  its Twenty CRM reads/writes to. Start here for "what object does X live on."
 
 Piece 2 (the rest of the Command Center — pipeline visibility, system health) is lower priority and
 grows incrementally after Piece 1 ships; mostly not started, except **Internal Team Messaging**
 (channels, @mentions, CRM comment threads, in-app alerts — `command-center/src/messaging/`), built
 ahead of that sequencing once asked, backed by a real, already-provisioned Cloudflare D1 database.
 
-**Brief v2 update (checked against everything already built, adjusted where affected):** Front Door
-Audit added as a real, parallel-running piece; MVP e-sign is now a lightweight inline capture, not
-Documenso; Stripe moved from deferred into Phase 1 with placeholder credentials; a new CRM
-Architecture section changed how CRM-writing workflows are structured. Piece 1 and Piece 3 (both
-below) were reviewed against v2 and updated where affected — see `command-center/README.md` and
-`workflows/README.md` for exactly what changed. Piece 3 itself (the KB demo generator) was
-unaffected — none of the v2 changes touch its scope.
+**Brief v2 update:** Front Door Audit added as a real, parallel-running piece; MVP e-sign is now a
+lightweight inline capture, not Documenso; Stripe moved from deferred into Phase 1 with placeholder
+credentials. Piece 3 (the KB demo generator) was unaffected — none of the v2 changes touch its scope.
+
+**Brief v4 update (`06 - Recent Changes Summary`):** the CRM object model changed — Location added as
+its own object, Opportunity can span multiple Locations, Company/Organization/Contract/Billing-
+Accounting-Period all locked in. Reviewed against everything already built before touching anything
+(per explicit request), then migrated in the agreed order: object model first. Command Center's
+messaging, every CRM-writing workflow, and the portal's `get-opportunity` function were all updated
+to anchor to the correct object — see `CRM-OBJECT-MODEL.md` and `workflows/README.md`'s CRM
+Architecture section for the full comparison and what moved. Not yet built: the alert-surface
+priority fix, the fixed 11-channel taxonomy, and Tag-for-Action — queued next, in that order.
 
 ## Piece 3: KB-powered demo generator
 

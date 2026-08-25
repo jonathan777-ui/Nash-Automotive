@@ -8,6 +8,10 @@ export const TIER_PRICES_CENTS: Record<string, number> = {
   Iridium: 260000,
 };
 
+/** CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): Checkout happens
+ * pre-sale, so opportunityId is still the right thing to carry in Stripe's metadata here — it's
+ * workflows/phase-1-mvp/stripe-payment-to-crm.workflow.json's job (not this function's) to resolve
+ * the Opportunity into a Company/Contract/Location set once the webhook fires on success. */
 export interface CheckoutInput {
   opportunityId: string;
   tier: string;

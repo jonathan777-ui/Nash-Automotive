@@ -16,10 +16,17 @@ against a real n8n instance once one exists, not as tested output.
 **Updated against brief v2** (`03 - Claude Code Handoff Brief` + the new `05 - Exhaustive Workflow &
 Automation Library`): Front Door Audit added as a real, parallel-running piece; MVP e-sign is now a
 lightweight inline capture, not Documenso; Stripe moved from deferred (Phase 5) into Phase 1 with
-placeholder credentials; a new CRM Architecture section (added below) changed how the Phase 1
-workflows write to Twenty CRM. Everything already built (Command Center, `src/server/`) was checked
+placeholder credentials. Everything already built (Command Center, `src/server/`) was checked
 against v2 and adjusted where it was affected — see each folder's own README for exactly what
 changed and why.
+
+**Updated again against brief v4** (`06 - Recent Changes Summary` + `05` FINAL v4): the CRM object
+model changed twice since — Location added as its own object, an Opportunity can span multiple
+Locations, Company/Organization/Contract/Billing-Accounting-Period all locked in. This was reviewed
+against everything already built before touching anything (per Jonathan's explicit request), then
+migrated in the agreed order: object model first. **`CRM-OBJECT-MODEL.md` at the repo root is now
+the canonical reference** for which object every workflow/function anchors to and why — see the CRM
+Architecture section below for the full comparison and what moved.
 
 ## Status legend
 
@@ -57,12 +64,12 @@ See `phase-0-infrastructure/README.md`.
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W1.1 | Lead intake → **parallel** Deep Dive Research + Front Door Audit → Demo Dashboard write | Webhook (lead form / scraper handoff) | Auto (enrichment, internal) | **Scaffolded**, with named placeholders for the two not-yet-built services — `phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` |
-| W1.2 | Demo generation trigger | Webhook (Demo Dashboard "generate" action) | Auto (internal) | **Partially built** — real logic is `src/server/`'s `POST /generate-demo` (checkpoint 5, code-complete); this workflow is the thin n8n wrapper around it. **Scaffolded** — `phase-1-mvp/demo-generation-trigger.workflow.json` |
+| W1.1 | Lead intake → resolve/create Location → **parallel** Deep Dive Research + Front Door Audit → Location + Opportunity writes | Webhook (lead form / scraper handoff) | Auto (enrichment, internal) | **Scaffolded**, with named placeholders for the two not-yet-built services — `phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json`. **Object model migration:** now resolves/creates a Location (GBP-driven) before running the two research calls; Front Door Audit writes to that Location, Deep Dive Research + Demo Queue stage stay on the Opportunity. |
+| W1.2 | Demo generation trigger | Webhook (Demo Dashboard "generate" action) | Auto (internal) | **Partially built** — real logic is `src/server/`'s `POST /generate-demo` (checkpoint 5, code-complete); this workflow is the thin n8n wrapper around it. **Scaffolded** — `phase-1-mvp/demo-generation-trigger.workflow.json`. **Object model migration:** demo status now also writes to the target Location; fixed a pre-existing bug where the CRM writes read a nonexistent `$json.body` field instead of the original webhook payload. |
 | W1.3 | Proposal delivery | Manual (rep sends) or CRM stage change | Auto to generate, human decides when to send | **Partially built** — `portal/public/proposal.html` exists and renders real tier/price options, but the surrounding proposal copy/terms are placeholder text (the brief doesn't specify the actual document content); no separate "delivery" workflow (email/link-send) is scaffolded. |
 | W1.4 | Portal e-sign submitted → CRM advance | Webhook (portal's own lightweight inline e-sign capture) | Auto (internal stage advance) | **Scaffolded, both sides** — `portal/public/proposal.html` + `portal/netlify/functions/submit-esign.mts` (the real capture UI and its backend) posting to `phase-1-mvp/portal-esign-submitted.workflow.json` (the n8n side). |
 | W1.5 | Onboarding Form submitted → CRM update | Webhook (portal form) | Auto (internal) | **Partially built** — `portal/public/onboarding.html` exists, but its detail fields (hours, contact email) are structural placeholders that don't submit anywhere yet; the brief doesn't specify the Onboarding Form's real field schema. The page's Stripe payment step (W1.6) is fully functional. |
-| W1.6 | Stripe payment → CRM advance → Live Client | Webhook (Stripe) | Auto — the brief's own explicit resolution of the billing-stage tension (see below) | **Scaffolded, both sides** — `portal/netlify/functions/create-checkout-session.mts` (creates the real Checkout Session, tier prices from the brief) + `phase-1-mvp/stripe-payment-to-crm.workflow.json` (the webhook/CRM-advance side), both against placeholder Stripe credentials until real ones land. **v2 change:** pulled forward from Phase 5 (deferred) into Phase 1 — Stripe has no verification-queue blocker, unlike Telnyx. |
+| W1.6 | Stripe payment → create Company/Contract/BillingPeriod → Locations Active → Opportunity Won | Webhook (Stripe) | Auto — the brief's own explicit resolution of the billing-stage tension (see below) | **Scaffolded, both sides** — `portal/netlify/functions/create-checkout-session.mts` (creates the real Checkout Session, tier prices from the brief) + `phase-1-mvp/stripe-payment-to-crm.workflow.json` (the webhook/CRM-advance side), both against placeholder Stripe credentials until real ones land. **v2 change:** pulled forward from Phase 5 into Phase 1. **Object model migration (this pass):** this is now where the Opportunity hands off to Company/Contract — creates the Company, creates a Contract mirroring the Opportunity's Locations, sets each Location's `contractStatus`, creates the first Billing/Accounting Period, and renames the Opportunity's terminal stage from an invented "Live Client" to the brief's own "Won." New-logo path only — Contract Amendment (existing Company) is explicitly not built this pass. |
 | W1.7 | Documents/Files access (PIN-gated, post-payment Drive folder repurposing) | Client action on the portal | Auto (internal, with an access audit log per §13) | Documented only |
 
 Portal step order per the brief: Proposal (W1.3) → e-sign (W1.4) → Onboarding Form (W1.5) → Stripe
@@ -162,7 +169,7 @@ are. See `phase-3-dialer-hopper/README.md`.
 |---|---|---|---|---|
 | W4.1 | Client health/usage scoring | Schedule or usage-event | Auto (internal scoring) | Documented only |
 | W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | Documented only |
-| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json` |
+| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json`. **Object model migration (this pass):** moved from querying Opportunities (`stage=LiveClient`, a state Opportunities no longer reach) to querying Companies (`status=LiveClient`) — this was a real bug, not a style fix; see the CRM Architecture section below. |
 | W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | Documented only |
 | W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | Documented only |
 | W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | **Scaffolded** — `phase-4-intelligence-layer/loss-reason-capture.workflow.json` |
@@ -224,32 +231,48 @@ to build now.
 
 ---
 
-## CRM Architecture (05 §13) — cross-cutting, not phase-specific
+## CRM Architecture (05 §13, FINAL v4 / LOCKED) — cross-cutting, not phase-specific
 
-New section in brief v2, added because it "was referenced but never its own section" before. This
-isn't a phase of workflows so much as the data model every CRM-writing workflow above has to respect
-— already applied as a correction to W1.1 (see its entry above) and worth restating here as the
-standing rule for anything written in this library from now on:
+**Superseded by `CRM-OBJECT-MODEL.md` at the repo root, which is now the canonical reference** — the
+paragraph below is kept only as a historical note of what changed and why. Brief v3's object model
+(a single Opportunity object, no Location) turned out to be provisional, not final: `06 - Recent
+Changes Summary` (v4) locked in a real five-level hierarchy — **Lead → Opportunity (spans multiple
+Locations) → Location (GBP-driven site; demos/audits attach here) → Company (Contracts attach here)
+→ Organization (optional)** — plus two new objects, **Contract** and **Billing/Accounting Period**
+(new `05 §15`, Financial Tracking).
 
-- **Object model** — a single Opportunity object (no separate Lead/Deal objects), spanning Cold
-  Lead → Contacted → Demo Scheduled → Demo Completed → Won/Lost, managed from the Company Card. This
-  is the strongest confirmation yet of this library's own "Demo Dashboard = a Twenty CRM stage view"
-  assumption (still worth confirming directly, but now more load-bearing than a guess).
-- **Communications Hub** and **Documents/Files object** — new custom-object concepts, cataloged as
-  W2.5 (above) and a Phase 1 item respectively; neither is built.
-- **Activity Event** — an append-only timeline; this is specifically what the AI Activity Summary
-  automation (part of W4.4) writes into once built, not a separate workflow of its own.
+This was a real correctness bug, not just a missing feature: this library's earlier "Demo Dashboard
+= a single Opportunity stage view" design, and W4.3's original query for `stage=LiveClient`
+Opportunities, both assumed Opportunity was the only addressable object. `LiveClient` is a post-sale
+state that Opportunities never actually reach once Company/Contract exist (Opportunities now
+terminate at `Won`) — so that query would have silently returned nothing forever. **Migrated this
+pass** (object model first, per Jonathan's explicit sequencing): `CRM-OBJECT-MODEL.md` defines the
+full hierarchy and states which object every workflow's writes anchor to and why; W1.1, W1.2, and
+W1.6 were restructured to write to Location/Company/Contract/BillingPeriod where the data is
+actually site- or client-level, not just Opportunity; W4.3 moved its whole query from Opportunities
+to Companies; W1.4/W2.6/W3.4/W4.6 were reviewed and confirmed correctly Opportunity-anchored as-is
+(pre-sale deal-level events, not touched). `command-center/src/messaging/`'s `comment_threads` table
+was migrated to a polymorphic `(subjectType, subjectId)` pair, matching Communications Hub's
+explicit polymorphism across Person/Location/Company/Opportunity.
+
+Still true and unaffected by the v4 object-model change:
 - **Opportunity Card UX principle** — "a status badge + button opening the actual tool in a new tab
   ... no embedded tools or inline live data inside the CRM itself; it references, it doesn't host."
-  **Binding on every workflow in this library that writes to Twenty CRM**, not just W1.1 (where it
-  was already applied as a fix): write status fields and link-out URLs, never raw content from
-  another system's response.
-- **Post-loss routing** — two Opportunity fields (Post-Loss Track: Nurture/Restricted; Restriction
-  Reason: DNC/Not Interested/Bad Information), not separate objects or pipelines — relevant to W4.6
-  (loss-reason capture, above) once built: it should write to these two fields, not invent new ones.
-- **DNC enforcement** — cataloged as W2.6 (above); cross-referenced here since §13 restates it
-  alongside the CRM object model specifically because DNC status has to be checkable *from* the
-  Opportunity record, not just enforced at the dialer.
+  Binding on every workflow that writes to Twenty CRM, regardless of which object it targets.
+- **Activity Event** — an append-only timeline; what the AI Activity Summary automation (W4.4) and
+  DNC overrides (W2.6) write into.
+- **DNC enforcement** (W2.6) and **post-loss routing** (W4.6) — confirmed still Opportunity-level;
+  see each workflow's own notes for why.
+- **Communications Hub** (W2.5) and **Documents/Files** (W1.7) — still not built; now explicitly
+  polymorphic across the same four subject types as `comment_threads` per the note above.
+
+**Not built this pass, explicitly out of scope per the agreed sequencing:** the Contract Amendment
+Flow (superseding an existing Company's Contract, Accounting Audit Event, Deal stage → "Expansion")
+and the Location Contract Lock *enforcement* workflow (blocking a new Opportunity on an already-
+active Location) — `CRM-OBJECT-MODEL.md` defines the fields both would need (`contractStatus` on
+Location, `supersededByContractId` on Contract), and W1.6 sets them correctly, but neither workflow
+itself is scaffolded yet. Also not built: the recurring monthly Billing/Accounting Period generation
+(W1.6 creates only the first one) and COGS/commission calculation.
 
 ## Internal Team Messaging (05 §14) — Command Center Piece 2, built
 
@@ -296,16 +319,18 @@ item. Worth resolving before that workflow matters for real; see that folder's R
 
 ## How this library relates to the rest of the repo
 
+- **`CRM-OBJECT-MODEL.md`** (repo root) — the canonical object-hierarchy reference every other file
+  below points back to instead of re-deriving it. Start here for "what object does X anchor to."
 - `command-center/` — Piece 1, gathers these credentials in the first place; also now Piece 2's
-  Internal Team Messaging (`src/messaging/`, built this pass — see below). Updated for v2: Stripe
-  added to the vendor checklist, Documenso removed.
-- `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 — none of
-  the changes (Front Door Audit, e-sign, Stripe, CRM Architecture) touch the KB demo generator's own
-  scope.
-- `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend), built the pass after brief
-  v2 landed. Its two fully functional Netlify Functions (`get-opportunity`,
-  `create-checkout-session`) and the e-sign capture flow (`proposal.html` + `submit-esign`) are the
-  other end of the W1.4/W1.6 workflows here — see `portal/README.md`.
+  Internal Team Messaging (`src/messaging/`). Updated for v2: Stripe added to the vendor checklist,
+  Documenso removed. Updated for v4: `comment_threads` migrated to polymorphic subjects.
+- `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 or v4 —
+  none of the changes touch the KB demo generator's own scope.
+- `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend). Its two fully functional
+  Netlify Functions (`get-opportunity`, `create-checkout-session`) and the e-sign capture flow
+  (`proposal.html` + `submit-esign`) are the other end of the W1.4/W1.6 workflows here — see
+  `portal/README.md`. Updated for v4: `get-opportunity` now returns an array of Locations (each
+  with its own Front Door Audit result) instead of flat fields on the Opportunity.
 - `phase-2-calendar-nurture-alerts/`, `phase-3-dialer-hopper/`, `phase-4-intelligence-layer/` — six
   more automations scaffolded this pass (W2.4, W2.6, W3.3, W3.4, W4.3, W4.6), picked because their
   *mechanics* weren't blocked on an undecided business rule even where their inputs — SLA thresholds

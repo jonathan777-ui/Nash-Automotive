@@ -6,7 +6,7 @@
       "name": "Lead intake webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-800, 0],
+      "position": [-1200, 0],
       "webhookId": "PLACEHOLDER_WEBHOOK_ID",
       "parameters": {
         "httpMethod": "POST",
@@ -14,14 +14,14 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "notes": "Fire-and-forget: acknowledges immediately rather than waiting on both parallel research calls plus the CRM write to finish, since the caller (website form / scraper handoff / manual add) doesn't need that result synchronously."
+      "notes": "Fire-and-forget: acknowledges immediately rather than waiting on location resolution + both parallel research calls + the CRM writes to finish, since the caller (website form / scraper handoff / manual add) doesn't need that result synchronously."
     },
     {
       "id": "26bdbc50-46cf-43c5-aab7-1d11931c64ee",
       "name": "Normalize lead fields",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [-560, 0],
+      "position": [-960, 0],
       "parameters": {
         "assignments": {
           "assignments": [
@@ -33,70 +33,23 @@
             { "id": "n6", "name": "vertical", "value": "={{ $json.body.vertical }}", "type": "string" },
             { "id": "n7", "name": "niche", "value": "={{ $json.body.niche }}", "type": "string" },
             { "id": "n8", "name": "websiteUrl", "value": "={{ $json.body.websiteUrl }}", "type": "string" },
-            { "id": "n9", "name": "opportunityId", "value": "={{ $json.body.opportunityId }}", "type": "string" }
+            { "id": "n9", "name": "gbpUrl", "value": "={{ $json.body.gbpUrl }}", "type": "string" },
+            { "id": "n10", "name": "opportunityId", "value": "={{ $json.body.opportunityId }}", "type": "string" }
           ]
         },
         "options": {}
       },
-      "notes": "UNCONFIRMED field shape - assumes the lead-intake caller posts these exact field names, including websiteUrl (needed by Front Door Audit) and opportunityId (the Twenty CRM record this lead was already created as, per Section 1's 'multi-source intake ... all land in one Opportunity object' - assumes the Opportunity is created before this webhook fires, not by this workflow). No source specifies the real lead form schema yet."
+      "notes": "UNCONFIRMED field shape - assumes the lead-intake caller posts these exact field names. Per CRM-OBJECT-MODEL.md (object model migration): gbpUrl added as its own field, separate from websiteUrl - Location is explicitly GBP-driven, so it's the primary key used to search/create the Location record, with websiteUrl as a fallback. Still assumes the Opportunity itself already exists (opportunityId supplied) - this workflow resolves/creates its Location, not the Opportunity."
     },
     {
-      "id": "cb801d67-20f0-4ddc-8e74-b103de45f926",
-      "name": "Deep Dive Research",
+      "id": "fc954e30-e230-42c2-9371-57174d7b4aeb",
+      "name": "Search Location by GBP/website",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-300, -120],
+      "position": [-720, 0],
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.DEEP_DIVE_RESEARCH_URL || 'PLACEHOLDER_DEEP_DIVE_RESEARCH_URL' }}/research",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {}
-      },
-      "notes": "Deep Dive Research doesn't exist as a built service yet - brief v2 describes it as 'business identity confirmation, web presence audit, review pattern analysis, competitor scan, opening-line recommendation - short brief, not full report,' with no request/output schema specified. This node's assumed response shape ({summary, reportUrl}, referenced downstream) is this workflow's own invention pending the real contract, not something confirmed - flagged, not silently guessed. Per the brief's architecture principle (demo generator = standalone service, not n8n Code nodes), this should most likely be another dedicated Node/TS service."
-    },
-    {
-      "id": "568c0668-4fed-4f91-8efc-63452badd52f",
-      "name": "Front Door Audit",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [-300, 120],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.FRONT_DOOR_AUDIT_URL || 'PLACEHOLDER_FRONT_DOOR_AUDIT_URL' }}/audit",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ websiteUrl: $json.websiteUrl, companyName: $json.companyName }) }}",
-        "options": {}
-      },
-      "notes": "NEW (brief v2) - 'live scored audit of the lead's actual website + AI-answer-engine readiness across 10 weighted categories (Score -> Rebuild Target -> Point Lift).' Not built anywhere in this repo: the brief names the shape of the output (a score, a rebuild target, a point lift) but not what the 10 categories actually are or how they're weighted - building the real scoring logic now would mean inventing those 10 categories, not encoding a decided set. This node's assumed response shape ({score, rebuildTarget, pointLift, reportUrl}, referenced downstream) is this workflow's own placeholder pending that design work, same flagged-not-guessed treatment as Deep Dive Research above. Runs in PARALLEL with Deep Dive Research per the Launch Checklist's explicit 'parallel Deep Dive Research + Front Door Audit' build step - both branch off the same Normalize node, not chained."
-    },
-    {
-      "id": "63c391c1-8875-473b-b875-51eb9bc092b4",
-      "name": "Merge research + audit",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [-40, 0],
-      "parameters": {
-        "mode": "combine",
-        "combineBy": "combineByPosition",
-        "options": {}
-      },
-      "notes": "UNVERIFIED: joins the two parallel branches back into one item before the CRM write, since both results are needed together. The Merge node's parameter names/shape (mode/combineBy) have changed across n8n versions more than most core nodes - this is the single most likely node in this workflow to need hand-fixing on import. If 'combine'/'combineByPosition' isn't right on the real instance, any mode that produces one item per input pair (not multiplied/all-pairs) is the goal."
-    },
-    {
-      "id": "6c52c009-75bd-46f0-8b1e-75573a7a5940",
-      "name": "Write Opportunity to Twenty CRM (stage: Demo Queue)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [220, 0],
-      "parameters": {
-        "method": "PATCH",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Normalize lead fields').item.json.opportunityId }}",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ stage: 'Demo Queue', dueDiligenceStatus: 'Complete', dueDiligenceReportUrl: $('Deep Dive Research').item.json.reportUrl, frontDoorAuditStatus: 'Complete', frontDoorAuditScore: $('Front Door Audit').item.json.score, frontDoorAuditReportUrl: $('Front Door Audit').item.json.reportUrl }) }}",
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations?filter=gbpUrl[eq]:{{ encodeURIComponent($json.gbpUrl || $json.websiteUrl) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -105,7 +58,172 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Per Section 13's Opportunity Card UX principle - 'a status badge + button opening the actual tool in a new tab, no embedded tools or inline live data inside the CRM itself; it references, it doesn't host' - this writes STATUS FIELDS AND LINK-OUT URLS, not the raw research/audit content. Corrected from an earlier draft of this workflow that dumped the full Deep Dive Research response into a CRM field, which the new CRM Architecture section explicitly rules out. Same Twenty CRM REST-shape uncertainty as before (confirm field names, and whether 'stage' is a literal string or a select-field option ID, against the real instance)."
+      "notes": "NEW (object model migration, CRM-OBJECT-MODEL.md): Location is a real object as of this pass, not folded into Opportunity fields. Searches by gbpUrl first, falling back to websiteUrl if no GBP link was provided - same priority order the input cascade (checkpoint 3 of the KB generator) already uses elsewhere in this repo. UNVERIFIED: the filter query syntax, same Twenty CRM REST-shape caveat as every workflow in this library."
+    },
+    {
+      "id": "5c382c54-9cef-43e1-90ce-3e14e6146a9a",
+      "name": "Location exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-480, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.data || $json.results || []).length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "UNVERIFIED: assumes a list response wraps records under 'data' or 'results' - tries both rather than committing to one guess, same pattern used elsewhere in this library (e.g. get-opportunity.mts)."
+    },
+    {
+      "id": "796997a0-ae5b-4dfb-8111-61e26564ee6f",
+      "name": "Use existing Location",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-240, -120],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "l1", "name": "locationId", "value": "={{ ($json.data || $json.results)[0].id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6235450c-8fd2-4355-b95b-7d1121b142b6",
+      "name": "Create Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $('Normalize lead fields').item.json.companyName, gbpUrl: $('Normalize lead fields').item.json.gbpUrl, websiteUrl: $('Normalize lead fields').item.json.websiteUrl, opportunityId: $('Normalize lead fields').item.json.opportunityId, contractStatus: 'None' }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "contractStatus starts 'None' per CRM-OBJECT-MODEL.md - this is the field Location Contract Lock will check once that enforcement workflow is built (Step 2/3, not this pass). Same Twenty CRM REST-shape uncertainty as every workflow here."
+    },
+    {
+      "id": "5ccc24b7-aad1-4ae7-b261-5a6d97f639c9",
+      "name": "Location resolved",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [0, 0],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "r1", "name": "locationId", "value": "={{ $json.locationId || $json.id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Convergence point for the two IF branches above (only one runs per execution) - re-emits a single consistently-named locationId so every downstream node can reference $('Location resolved').item.json.locationId regardless of which branch actually produced it, rather than trying to conditionally reference two different upstream node names."
+    },
+    {
+      "id": "cb801d67-20f0-4ddc-8e74-b103de45f926",
+      "name": "Deep Dive Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, -120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DEEP_DIVE_RESEARCH_URL || 'PLACEHOLDER_DEEP_DIVE_RESEARCH_URL' }}/research",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Normalize lead fields').item.json) }}",
+        "options": {}
+      },
+      "notes": "Deep Dive Research doesn't exist as a built service yet - see this node's notes in earlier versions of this file for the full caveat. Now runs AFTER Location resolution rather than immediately off Normalize (a deliberate simplification from the previous 3-way-parallel-fan-out design - avoids needing a second uncertain Merge node; the added latency of resolving Location first is a reasonable tradeoff, not a correctness issue, since DDR doesn't need locationId as an input anyway). Still runs in PARALLEL with Front Door Audit, per the Launch Checklist's explicit requirement - both branch off 'Location resolved.'"
+    },
+    {
+      "id": "568c0668-4fed-4f91-8efc-63452badd52f",
+      "name": "Front Door Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FRONT_DOOR_AUDIT_URL || 'PLACEHOLDER_FRONT_DOOR_AUDIT_URL' }}/audit",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ websiteUrl: $('Normalize lead fields').item.json.websiteUrl, companyName: $('Normalize lead fields').item.json.companyName, locationId: $('Location resolved').item.json.locationId }) }}",
+        "options": {}
+      },
+      "notes": "Still a named placeholder service (10 audit categories not specified - see workflows/README.md). Now includes locationId in the request, since the audit result is about to be written onto that Location record, not the Opportunity - Front Door Audit is inherently per-site per CRM-OBJECT-MODEL.md."
+    },
+    {
+      "id": "63c391c1-8875-473b-b875-51eb9bc092b4",
+      "name": "Merge research + audit",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [520, 0],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "notes": "UNVERIFIED: same Merge-node parameter-shape caveat as before - the single most likely node in this workflow to need hand-fixing on import."
+    },
+    {
+      "id": "db078440-f2e2-449a-bc22-3f425a25556f",
+      "name": "Write Front Door Audit to Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, -120],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $('Location resolved').item.json.locationId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ frontDoorAuditStatus: 'Complete', frontDoorAuditScore: $('Front Door Audit').item.json.score, frontDoorAuditReportUrl: $('Front Door Audit').item.json.reportUrl }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "MOVED from the Opportunity write (previous version of this workflow) to the Location, per CRM-OBJECT-MODEL.md: audits are per-site, and an Opportunity can span multiple Locations each needing their own independent audit result - writing this to the Opportunity would silently break the moment a second Location exists on the same deal. Still follows the Opportunity Card 'status + link, not raw content' principle."
+    },
+    {
+      "id": "6c52c009-75bd-46f0-8b1e-75573a7a5940",
+      "name": "Write Opportunity (stage: Demo Queue)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 120],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Normalize lead fields').item.json.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Demo Queue', dueDiligenceStatus: 'Complete', dueDiligenceReportUrl: $('Deep Dive Research').item.json.reportUrl, locationIds: [$('Location resolved').item.json.locationId] }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Deep Dive Research stays Opportunity-level (business-identity-level, not site-level) per CRM-OBJECT-MODEL.md. locationIds is set to a single-element array here, not appended - this workflow assumes it's the FIRST Location resolved for a freshly-created Opportunity; a lead that already has other Locations attached would need a read-modify-write instead of this overwrite. Flagged, not silently wrong: worth revisiting once a real multi-location intake scenario exists to design against. Same Twenty CRM REST-shape uncertainty as every workflow here, and same Opportunity Card UX principle (status + links, not raw content)."
     }
   ],
   "connections": {
@@ -113,6 +231,24 @@
       "main": [[{ "node": "Normalize lead fields", "type": "main", "index": 0 }]]
     },
     "Normalize lead fields": {
+      "main": [[{ "node": "Search Location by GBP/website", "type": "main", "index": 0 }]]
+    },
+    "Search Location by GBP/website": {
+      "main": [[{ "node": "Location exists?", "type": "main", "index": 0 }]]
+    },
+    "Location exists?": {
+      "main": [
+        [{ "node": "Use existing Location", "type": "main", "index": 0 }],
+        [{ "node": "Create Location", "type": "main", "index": 0 }]
+      ]
+    },
+    "Use existing Location": {
+      "main": [[{ "node": "Location resolved", "type": "main", "index": 0 }]]
+    },
+    "Create Location": {
+      "main": [[{ "node": "Location resolved", "type": "main", "index": 0 }]]
+    },
+    "Location resolved": {
       "main": [
         [
           { "node": "Deep Dive Research", "type": "main", "index": 0 },
@@ -127,7 +263,12 @@
       "main": [[{ "node": "Merge research + audit", "type": "main", "index": 1 }]]
     },
     "Merge research + audit": {
-      "main": [[{ "node": "Write Opportunity to Twenty CRM (stage: Demo Queue)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          { "node": "Write Front Door Audit to Location", "type": "main", "index": 0 },
+          { "node": "Write Opportunity (stage: Demo Queue)", "type": "main", "index": 0 }
+        ]
+      ]
     }
   },
   "active": false,

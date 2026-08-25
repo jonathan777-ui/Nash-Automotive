@@ -31,9 +31,16 @@ export interface Message {
   createdAt: string;
   mentions: string[];
 }
+/** Every subject type a comment thread can attach to, per CRM-OBJECT-MODEL.md — Communications Hub
+ * (and comment threads with it) are explicitly polymorphic across these four in 05 §13, not
+ * Opportunity-only. 'lead' is included even though nothing writes to it yet, since a thread could
+ * reasonably start before a Lead becomes an Opportunity. */
+export type SubjectType = 'lead' | 'opportunity' | 'location' | 'company' | 'organization';
+
 export interface CommentThread {
   id: string;
-  opportunityId: string;
+  subjectType: SubjectType;
+  subjectId: string;
   createdAt: string;
 }
 export interface Comment {
@@ -116,17 +123,20 @@ export async function listMessages(db: D1Like, channelId: string, limit = 100): 
   return messages.reverse();
 }
 
-export async function getOrCreateThread(db: D1Like, opportunityId: string): Promise<CommentThread> {
+export async function getOrCreateThread(db: D1Like, subjectType: SubjectType, subjectId: string): Promise<CommentThread> {
   const existing = await db
-    .prepare('SELECT id, opportunity_id AS opportunityId, created_at AS createdAt FROM comment_threads WHERE opportunity_id = ?')
-    .bind(opportunityId)
+    .prepare(
+      'SELECT id, subject_type AS subjectType, subject_id AS subjectId, created_at AS createdAt ' +
+        'FROM comment_threads WHERE subject_type = ? AND subject_id = ?',
+    )
+    .bind(subjectType, subjectId)
     .all<CommentThread>();
   if (existing.results[0]) return existing.results[0];
 
-  const thread: CommentThread = { id: newId(), opportunityId, createdAt: nowIso() };
+  const thread: CommentThread = { id: newId(), subjectType, subjectId, createdAt: nowIso() };
   await db
-    .prepare('INSERT INTO comment_threads (id, opportunity_id, created_at) VALUES (?, ?, ?)')
-    .bind(thread.id, thread.opportunityId, thread.createdAt)
+    .prepare('INSERT INTO comment_threads (id, subject_type, subject_id, created_at) VALUES (?, ?, ?, ?)')
+    .bind(thread.id, thread.subjectType, thread.subjectId, thread.createdAt)
     .run();
   return thread;
 }

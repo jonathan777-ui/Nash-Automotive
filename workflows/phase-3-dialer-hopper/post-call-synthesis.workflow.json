@@ -73,7 +73,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library."
+      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a sales call is about advancing a specific deal, so it stays Opportunity-anchored regardless of pre- or post-sale timing."
     },
     {
       "id": "7c60cc42-4ebb-4518-987b-060f9eb02d6c",

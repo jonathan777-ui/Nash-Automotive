@@ -50,29 +50,40 @@
   document.getElementById('company-name').textContent = opp.companyName;
   document.title = `${opp.companyName}'s Front Door Audit — Orbit AI`;
 
-  const auditDone = opp.frontDoorAuditStatus === 'Complete';
+  // Audit results are per-Location (a GBP-driven site), not per-Opportunity — an Opportunity can
+  // span more than one Location, each with its own independent audit. Render one card per site
+  // rather than assuming there's exactly one.
+  const locations = opp.locations || [];
 
   let auditBlock;
-  if (auditDone && typeof opp.frontDoorAuditScore === 'number') {
-    auditBlock = `
-      <div class="score-row">
-        <div class="score-circle">${escapeHtml(String(opp.frontDoorAuditScore))}</div>
-        <div class="score-labels">
-          <div>Current Front Door Score, out of 100</div>
-          <div class="lift">See the full breakdown and rebuild target in your detailed report →</div>
-        </div>
-      </div>
-      ${opp.frontDoorAuditReportUrl ? `<a class="primary" style="display:inline-block;text-decoration:none;text-align:center" href="${escapeHtml(opp.frontDoorAuditReportUrl)}" target="_blank" rel="noopener">Open full audit report</a>` : ''}
-    `;
-  } else {
+  if (locations.length === 0) {
     auditBlock = `<p>${statusBadge('Audit in progress', 'pending')} — this finishes shortly after your demo request comes in. Check back, or continue to your demo below.</p>`;
+  } else {
+    auditBlock = locations
+      .map((loc) => {
+        const done = loc.frontDoorAuditStatus === 'Complete' && typeof loc.frontDoorAuditScore === 'number';
+        if (!done) {
+          return `<div class="card"><p><strong>${escapeHtml(loc.name)}</strong></p><p>${statusBadge('Audit in progress', 'pending')} — check back shortly.</p></div>`;
+        }
+        return `
+          <div class="card">
+            <p><strong>${escapeHtml(loc.name)}</strong></p>
+            <div class="score-row">
+              <div class="score-circle">${escapeHtml(String(loc.frontDoorAuditScore))}</div>
+              <div class="score-labels">
+                <div>Current Front Door Score, out of 100</div>
+                <div class="lift">See the full breakdown and rebuild target in your detailed report →</div>
+              </div>
+            </div>
+            ${loc.frontDoorAuditReportUrl ? `<a class="primary" style="display:inline-block;text-decoration:none;text-align:center" href="${escapeHtml(loc.frontDoorAuditReportUrl)}" target="_blank" rel="noopener">Open full audit report</a>` : ''}
+          </div>`;
+      })
+      .join('');
   }
 
   contentEl.innerHTML = `
-    <div class="card">
-      ${auditBlock}
-    </div>
-    <a class="primary" style="display:inline-block;text-decoration:none;text-align:center" href="/proposal.html?id=${encodeURIComponent(getOpportunityId())}">Continue to your proposal →</a>
+    ${auditBlock}
+    <a class="primary" style="display:inline-block;text-decoration:none;text-align:center;margin-top:8px" href="/proposal.html?id=${encodeURIComponent(getOpportunityId())}">Continue to your proposal →</a>
   `;
 })();
 </script>

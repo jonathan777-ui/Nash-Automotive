@@ -58,16 +58,16 @@
     },
     {
       "id": "3d2ce9b9-e861-489a-a410-8148f434caf1",
-      "name": "Advance to Pending Demos",
+      "name": "Advance Opportunity to Pending Demos",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [160, -100],
+      "position": [160, -160],
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Generate demo webhook').item.json.body.opportunityId }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ stage: 'Pending Demos', demoStepUsed: $json.stepUsed }) }}",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Pending Demos' }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -76,7 +76,29 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Same Twenty CRM REST-shape uncertainty as W1.1 - and this specifically also assumes the triggering webhook payload carries the Opportunity's Twenty CRM record ID as 'opportunityId', which needs confirming against whatever actually calls this webhook (the Demo Dashboard UI/action). Already consistent with Section 13's Opportunity Card UX principle (status field only, no embedded demo content) - add a demoSiteUrl field here once a real hosted-demo URL exists (the 'Demo Site' status badge Section 13 describes needs a link to open in a new tab; that link doesn't exist yet since the three demo-rendering surfaces aren't built - see root README's 'Next' section)."
+      "notes": "BUG FIX while extending this file for the object model migration: this node previously read '$json.body.opportunityId', but $json at this point is the demo generator's OWN response ({ok, unifiedKb, stepUsed} or {ok, stage, reason}, per src/server/README.md) - it has no '.body' field at all, so that expression was always undefined. Fixed to reference $('Generate demo webhook') directly, the same pattern the 'Alert: generation failed' node below already used correctly. Same Twenty CRM REST-shape uncertainty as W1.1. Stage stays on the Opportunity per CRM-OBJECT-MODEL.md's table (the deal-progress funnel stage is the Opportunity's job) - demoStepUsed MOVED off this node to the Location write below, since demo content/status is per-site, not per-deal."
+    },
+    {
+      "id": "fc954e30-e230-42c2-9371-57174d7b4aeb",
+      "name": "Write demo status to Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, -40],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $('Generate demo webhook').item.json.body.locationId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ demoStatus: 'Generated', demoStepUsed: $json.stepUsed }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "NEW (object model migration): demo generation is inherently per-Location per CRM-OBJECT-MODEL.md, since src/server/'s /generate-demo call is itself scoped to one GBP/business. ASSUMES the triggering webhook payload now also carries 'locationId' (added alongside opportunityId) - whatever calls this webhook (the Demo Dashboard UI/action) needs to know which Location it's regenerating a demo for, which matters once an Opportunity spans more than one. demoStepUsed here correctly reads $json.stepUsed - unlike the two opportunityId/locationId reads, THIS field genuinely does come from the demo generator's own response (the current $json at this point), not the original webhook body. Add a demoSiteUrl field here once a real hosted-demo URL exists (the 'Demo Site' status badge Section 13 describes)."
     },
     {
       "id": "a4f1b771-ae6f-41a2-9a77-cba7fbcb3289",
@@ -104,7 +126,10 @@
     },
     "Generated OK?": {
       "main": [
-        [{ "node": "Advance to Pending Demos", "type": "main", "index": 0 }],
+        [
+          { "node": "Advance Opportunity to Pending Demos", "type": "main", "index": 0 },
+          { "node": "Write demo status to Location", "type": "main", "index": 0 }
+        ],
         [{ "node": "Alert: generation failed", "type": "main", "index": 0 }]
       ]
     }

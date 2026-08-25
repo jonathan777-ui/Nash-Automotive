@@ -71,7 +71,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Writes the signature's own fields (typed name, timestamp, IP) directly onto the Opportunity - unlike the research/audit content in the lead-intake workflow, this doesn't violate the Opportunity Card 'no embedded live data' principle, since a signature record IS the CRM-native fact being tracked here, not a rendering of some other tool's content. Same Twenty CRM REST-shape uncertainty as every other workflow in this library."
+      "notes": "Writes the signature's own fields (typed name, timestamp, IP) directly onto the Opportunity - unlike the research/audit content in the lead-intake workflow, this doesn't violate the Opportunity Card 'no embedded live data' principle, since a signature record IS the CRM-native fact being tracked here, not a rendering of some other tool's content. Same Twenty CRM REST-shape uncertainty as every other workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): e-sign is a pre-sale event on the deal itself, so it correctly stays Opportunity-anchored - not moved to Location or Company the way Front Door Audit/demo content and post-sale automations were."
     },
     {
       "id": "53032ba3-1f9b-4711-b70e-1038097aa47a",

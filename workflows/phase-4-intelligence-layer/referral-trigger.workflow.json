@@ -15,13 +15,13 @@
     },
     {
       "id": "8b488719-0875-4714-ba91-671768cae607",
-      "name": "List Live Client Opportunities",
+      "name": "List Live Client Companies",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [-580, 0],
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities?filter=stage[eq]:LiveClient",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -30,7 +30,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "UNVERIFIED: the filter query string syntax (stage[eq]:LiveClient) is a guess at Twenty CRM's REST filtering convention, not confirmed. Also assumes every Opportunity carries a liveClientSince timestamp and an engagementScore field (the latter written by W4.1's health/usage scoring, not built) - if engagementScore doesn't exist yet, this workflow has nothing real to filter on and will need adjusting once W4.1 exists."
+      "notes": "MOVED from Opportunities to Companies this pass (object model migration, CRM-OBJECT-MODEL.md) - this was the concrete bug the v4 comparison surfaced: 'Live Client' is a post-sale state, and post-sale automations (health/usage scoring, tier upgrade, referral, churn) operate on the Company that now represents the ongoing client relationship, not the Opportunity that was the pre-sale funnel object. Querying Opportunities filtered to a stage that Opportunities no longer even reach (W1.6 now advances Opportunities to 'Won', not 'LiveClient') would have returned nothing, silently. UNVERIFIED: the filter query string syntax, same Twenty CRM REST-shape uncertainty as every workflow here. Assumes every Company carries the liveClientSince timestamp W1.6's 'Create Company' node now sets, and an engagementScore field (written by W4.1's health/usage scoring, not built) - if engagementScore doesn't exist yet, this workflow has nothing real to filter on and will need adjusting once W4.1 exists."
     },
     {
       "id": "7546ddbb-e12b-4b01-8f2d-cf1f50378bc3",
@@ -50,18 +50,18 @@
       "typeVersion": 2,
       "position": [-140, 0],
       "parameters": {
-        "jsCode": "// Neither number is specified by the brief - both are named placeholders standing in for a real\n// decision, same pattern as every other undecided-but-not-blocking value in this repo. Set real\n// values here (or via env vars) once the actual thresholds are decided; nothing else about this\n// workflow needs to change.\nconst MIN_TENURE_DAYS = Number($env.PLACEHOLDER_REFERRAL_TENURE_DAYS || 90);\nconst MIN_ENGAGEMENT_SCORE = Number($env.PLACEHOLDER_REFERRAL_ENGAGEMENT_THRESHOLD || 70);\n\nconst results = [];\nfor (const item of $input.all()) {\n  const opp = item.json;\n  const tenureDays = opp.liveClientSince\n    ? Math.floor((Date.now() - new Date(opp.liveClientSince).getTime()) / 86400000)\n    : 0;\n  const eligible = tenureDays >= MIN_TENURE_DAYS && (opp.engagementScore ?? 0) >= MIN_ENGAGEMENT_SCORE;\n  if (eligible) {\n    results.push({ json: { opportunityId: opp.id, companyName: opp.name, tenureDays, engagementScore: opp.engagementScore } });\n  }\n}\nreturn results;"
+        "jsCode": "// Neither number is specified by the brief - both are named placeholders standing in for a real\n// decision, same pattern as every other undecided-but-not-blocking value in this repo. Set real\n// values here (or via env vars) once the actual thresholds are decided; nothing else about this\n// workflow needs to change.\nconst MIN_TENURE_DAYS = Number($env.PLACEHOLDER_REFERRAL_TENURE_DAYS || 90);\nconst MIN_ENGAGEMENT_SCORE = Number($env.PLACEHOLDER_REFERRAL_ENGAGEMENT_THRESHOLD || 70);\n\nconst results = [];\nfor (const item of $input.all()) {\n  const company = item.json;\n  const tenureDays = company.liveClientSince\n    ? Math.floor((Date.now() - new Date(company.liveClientSince).getTime()) / 86400000)\n    : 0;\n  const eligible = tenureDays >= MIN_TENURE_DAYS && (company.engagementScore ?? 0) >= MIN_ENGAGEMENT_SCORE;\n  if (eligible) {\n    results.push({ json: { companyId: company.id, companyName: company.name, tenureDays, engagementScore: company.engagementScore } });\n  }\n}\nreturn results;"
       }
     },
     {
       "id": "6fe18721-a59c-4415-830d-6054855639b6",
-      "name": "Flag referral-eligible on Opportunity",
+      "name": "Flag referral-eligible on Company",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [100, -80],
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.opportunityId }}",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies/{{ $json.companyId }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ referralEligible: true }) }}",
@@ -73,7 +73,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "Auto-flags eligibility (internal, reversible) - per the automation risk boundary, actually ASKING the client for a referral is an external send and stays human-gated, which is why this workflow stops at flagging + alerting a rep, not drafting/sending anything itself."
+      "notes": "Auto-flags eligibility (internal, reversible) - per the automation risk boundary, actually ASKING the client for a referral is an external send and stays human-gated, which is why this workflow stops at flagging + alerting a rep, not drafting/sending anything itself. Writes to Company now, matching the query above."
     },
     {
       "id": "b3bdc22d-dc2d-48c3-b493-027be31dafb1",
@@ -89,23 +89,23 @@
         "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'referral-trigger', message: $json.companyName + ' is now referral-eligible (' + $json.tenureDays + ' days tenure, engagement ' + $json.engagementScore + ') - reach out to ask.' }) }}",
         "options": {}
       },
-      "notes": "Calls the real alert-dispatcher workflow (phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json) by its webhook path, not a bare placeholder - this is the first workflow in this library built after that dispatcher existed, so it uses it directly instead of a standalone alert node."
+      "notes": "Calls the real alert-dispatcher workflow (phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json) by its webhook path, not a bare placeholder."
     }
   ],
   "connections": {
     "Daily at 8am": {
-      "main": [[{ "node": "List Live Client Opportunities", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "List Live Client Companies", "type": "main", "index": 0 }]]
     },
-    "List Live Client Opportunities": {
+    "List Live Client Companies": {
       "main": [[{ "node": "Split Out", "type": "main", "index": 0 }]]
     },
     "Split Out": {
       "main": [[{ "node": "Meets tenure + engagement threshold?", "type": "main", "index": 0 }]]
     },
     "Meets tenure + engagement threshold?": {
-      "main": [[{ "node": "Flag referral-eligible on Opportunity", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Flag referral-eligible on Company", "type": "main", "index": 0 }]]
     },
-    "Flag referral-eligible on Opportunity": {
+    "Flag referral-eligible on Company": {
       "main": [[{ "node": "Alert rep", "type": "main", "index": 0 }]]
     }
   },

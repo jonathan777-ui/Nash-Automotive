@@ -83,6 +83,17 @@ the dedicated node's guided OAuth setup may just be less work. `GOOGLE_CALENDAR_
 credential gap, same treatment as `SMS_PROVIDER_URL` — not yet in the Command Center vendor
 checklist.
 
+## W2.2 — `nurture-cadence.workflow.json` + W2.3 — `cx-cadence.workflow.json`
+
+Both draft (via a real Claude call, never auto-send) a re-engagement/check-in touch on a schedule,
+advancing a wave counter and timestamp on the record either way so the cadence keeps moving even if
+a rep never sends a given draft. **W2.3's timing is brief-given verbatim** (`05 §9`: 7-day, then
+30/60/90-day, then quarterly), keyed off `Company.status: 'LiveClient'` + `liveClientSince`/
+`lastCxTouchAt`. **W2.2's timing (3/14/45/90 days, then quarterly) is this pass's own judgment
+call** — not specified anywhere in the source docs, flagged explicitly in the workflow's own notes
+rather than presented as decided — keyed off `Opportunity.postLossTrack: 'Nurture'`, the one
+already-documented trigger state with real data (`loss-reason-capture.workflow.json` / W4.6 sets it).
+
 ## `tag-for-action.workflow.json` (new, not brief-W-numbered — Command Center Step 5)
 
 `05 §14`'s Tag-for-Action mechanism, the n8n side: logs a `TagForAction` Activity Event on Twenty

@@ -161,8 +161,10 @@ kept growing across passes without a canonical list.
   `lastCallTryBackTime`/`lastCallDmPresence`/`lastCallRebuttalFlag` (all from
   `post-call-synthesis.workflow.json`), `deepDiveResearchStatus`, `frontDoorAuditStatus` (mirrors
   each spanned Location's own, see Location below), `openingLineId` (nullable — which Deep Dive
-  Research opening-line recommendation this lead got, for W4.7's conversion tracking; new this pass,
-  not yet written by anything since Deep Dive Research itself isn't built in this repo).
+  Research opening-line recommendation this lead got, for W4.7's conversion tracking; not yet
+  written by anything since Deep Dive Research itself isn't built in this repo),
+  `lastNurtureTouchAt`/`nurtureWave`/`lastNurtureDraftText` (`nurture-cadence.workflow.json`'s own
+  state, scoped to `postLossTrack: 'Nurture'` opportunities).
 - Assumed REST: `/rest/opportunities`, `/rest/opportunities/{id}`.
 - **`Expansion` is not a new-logo stage** — an Opportunity reaching `Expansion` didn't travel
   DemoQueue→...→Won first; it's created directly (or reused) specifically to represent an existing
@@ -196,7 +198,10 @@ The commercial entity. Contracts attach here. Every post-sale automation (health
 tier-upgrade signal, referral trigger, churn, Front Door Audit refresh) operates on Company, not
 Opportunity — see the load-bearing distinction above.
 
-- Fields: `id`, `name`, `organizationId` (nullable).
+- Fields: `id`, `name`, `organizationId` (nullable), `status` (`LiveClient` and others as post-sale
+  states get built out), `liveClientSince`, `lastCxTouchAt`/`cxWave`/`lastCxDraftText` (new this
+  pass — `cx-cadence.workflow.json`'s own state, the 7/30/60/90-day-then-quarterly cadence `05 §9`
+  gives explicitly).
 - Assumed REST: `/rest/companies`, `/rest/companies/{id}`.
 
 ### Organization

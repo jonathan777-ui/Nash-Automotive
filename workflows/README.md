@@ -103,8 +103,8 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
 | W2.1 | Unified calendar write-through + Missed Follow-up + no-show re-engagement | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | **Scaffolded** — `phase-2-calendar-nurture-alerts/unified-scheduling.workflow.json` + `missed-follow-up-check.workflow.json` + `no-show-reengagement.workflow.json` |
-| W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | Documented only |
-| W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Stage = Live Client + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | Documented only |
+| W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | **Scaffolded** — `phase-2-calendar-nurture-alerts/nurture-cadence.workflow.json` |
+| W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Company status = LiveClient + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | **Scaffolded** — `phase-2-calendar-nurture-alerts/cx-cadence.workflow.json` |
 | W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat + Command Center in-app (both real) + SMS on critical (still a placeholder — no provider in `02 - Launch Checklist`) — see that folder's README. |
 | W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
@@ -122,8 +122,13 @@ None of the three are called from anywhere in this repo yet — they're real, ca
 on their callers (a Deals Desk-style UI to disposition touches, and every other workflow that should
 be scheduling through this layer instead of nothing at all today).
 
-W2.2/W2.3 still need the nurture/CX message *content* decided (the brief resolves the CX cadence's
-timing — 7/30/60/90-day then quarterly — but not what each touch says).
+**W2.2/W2.3 built this pass.** The message *content* still isn't brief-specified (only CX's timing
+is — 7/30/60/90-day then quarterly, `05 §9`, encoded verbatim; nurture's timing is this pass's own
+judgment call, flagged as such in the workflow's own notes, not presented as decided) — so both
+workflows draft each touch via a real Claude call rather than sending a fixed template, and never
+auto-send, per the automation risk boundary. Neither is wired to a real trigger source yet: W2.2
+scopes to `postLossTrack: 'Nurture'` opportunities (the one already-decided state with real data to
+key off — W4.6's loss-reason-capture sets it), W2.3 to `Company.status: 'LiveClient'`.
 
 **W2.4 — scaffolded in an earlier pass, alert-surface priority fixed this pass (Step 3).** The
 dispatch mechanism itself (receive an alert, route to Google Chat and/or SMS by severity) didn't need

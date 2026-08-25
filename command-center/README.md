@@ -62,11 +62,14 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   those rows is just a "mark connected" checkbox, tracked in a new Cloudflare KV namespace
   (`STATUS`) I provisioned directly during this build — a real, non-placeholder resource, since KV
   is one of the few things the tools in this session could actually create.
-- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n, and —
-  new this pass — Telnyx) work exactly like checkpoint 2, generalized to handle vendors needing more
-  than one field (n8n needs both an instance URL and an API key; Stripe needs a publishable key,
-  secret key, and webhook signing secret; Telnyx needs five: an API key, a Call Control connection
-  ID, a SIP domain, a default outbound number, and a shared demo-line number).
+- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n,
+  Telnyx, and — new this pass — Netlify API access) work exactly like checkpoint 2, generalized to
+  handle vendors needing more than one field (Twenty CRM needs a Base URL and an API token; Stripe
+  needs a publishable key, secret key, and webhook signing secret; Telnyx needs five: an API key, a
+  Call Control connection ID, a SIP domain, a default outbound number, and a shared demo-line
+  number; Netlify API access needs a Personal Access Token, account slug, and site ID). See "The
+  wizard now pushes credentials to where they're actually used," below, for what's new about n8n
+  and Netlify specifically this pass.
 - **Documenso is deliberately not in this list.** Brief v2 / `02 - Launch Checklist` v2 moved it
   out of Phase 1's credential set entirely — MVP e-sign is a lightweight inline capture built
   directly into the portal (typed name + checkbox + timestamp + IP, no vendor account needed).
@@ -75,15 +78,53 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   Telnyx) has no account-verification-queue blocker, so the whole payment-link + webhook + CRM
   stage-advance flow is built now against placeholder values and activates the moment real keys
   land here. See `workflows/phase-1-mvp/stripe-payment-to-crm.workflow.json`.
-- **Four rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, Gemini/AI Studio, and —
-  new this pass — Telnyx. I could not verify from here whether Oracle's `oci setup config` is
-  genuinely a one-click flow like the other three, whether `gcloud auth application-default login`
-  alone is sufficient for Drive API access or just a first step, whether the Gemini API key issuance
-  might actually route through that same Google Cloud CLI login rather than needing its own manual
-  paste, or the exact number of manual setup steps in the Telnyx portal (SIP trunk creation, Call
-  Control app, number search/ordering) behind the five fields this form collects. See the
-  `uncertain` fields and their comments in `src/vendors.ts` for specifics — worth checking against
-  reality during the checkpoint-3 walkthrough rather than assuming the guess is right.
+- **Five rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, Gemini/AI Studio,
+  Telnyx, and — new this pass — the Netlify API row (below). I could not verify from here whether
+  Oracle's `oci setup config` is genuinely a one-click flow like the other three, whether `gcloud
+  auth application-default login` alone is sufficient for Drive API access or just a first step,
+  whether the Gemini API key issuance might actually route through that same Google Cloud CLI login
+  rather than needing its own manual paste, the exact number of manual setup steps in the Telnyx
+  portal (SIP trunk creation, Call Control app, number search/ordering) behind the five fields that
+  form collects, or Netlify's exact env-var API shape. See the `uncertain` fields and their
+  comments in `src/vendors.ts` for specifics — worth checking against reality during the
+  checkpoint-3 walkthrough rather than assuming the guess is right.
+
+### The wizard now pushes credentials to where they're actually used (new this pass)
+
+Every credential this form collects has always been written to Cloudflare Secrets Store as the
+system of record — but until this pass, that's *all* it did. n8n and the portal (on Netlify) each
+need their own copy of the same values, and getting them there was a fully manual step: `portal/
+README.md`'s own env var table has said "same names... so copying a value from there to a Netlify
+env var is a rename-free copy" since it was written — a rename-free copy a human still had to
+actually perform.
+
+**Now the wizard does that copy itself, best-effort, the moment you save a field**, reported right
+back in the same success banner ("pushed to n8n as 'Claude API' (created)", "pushed to Netlify as
+STRIPE_SECRET_KEY", or "n8n not connected yet — save the n8n API key above first"). Two new
+"pusher" vendor rows make this possible:
+
+- **n8n** — now collects only the API key (the Instance URL moved to a plain `wrangler.toml` var,
+  fixing a real bug this pass found: the wizard used to write the Instance URL into Secrets Store,
+  where nothing ever actually read it back). Saving the key binds it directly onto this Worker
+  (`src/cfWorkerSecrets.ts`, Cloudflare's Workers Scripts API — the same mechanism `wrangler secret
+  put` itself uses), not just Secrets Store, so this Worker's own code can use it afterward.
+- **Netlify (API access)** — a new row, distinct from the existing Netlify CLI-auth row (that one's
+  for *you* to deploy the portal from a terminal; this one's a Personal Access Token + account
+  slug + site ID this Worker uses to push env vars into the portal's Netlify site on your behalf).
+
+Once those two are connected, saving **Twenty CRM** (API token *and* the new Base URL field — also
+new this pass, previously never collected at all even though every workflow/function in this repo
+reads it), **Claude API**, **Telnyx**'s API key, or **Stripe**'s Secret key pushes automatically to
+whichever of n8n (as a named Credential object) and/or Netlify (as a site env var) actually
+consumes that value — see each vendor's own `hint` text in `src/vendors.ts` for exactly which
+destinations apply to which field.
+
+**Real, stated scope limit, not silently worked around:** this can only push values n8n reads
+through a named Credential object. A lot of what this repo's workflows need — `TWENTY_CRM_BASE_URL`
+inside n8n itself, `STRIPE_WEBHOOK_SECRET`, all four of Telnyx's non-API-key fields — are read as
+n8n's own runtime `$env.SOMETHING` instead, which has no REST API to set remotely on a self-hosted
+instance. Those still need adding to n8n's own environment directly (Docker Compose env / systemd
+unit on the Oracle box) — flagged in the relevant vendor's own hint text, not hidden.
 
 ## Piece 2 — Internal Team Messaging (05 §14)
 

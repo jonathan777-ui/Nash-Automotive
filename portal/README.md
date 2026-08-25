@@ -96,11 +96,13 @@ behavior is testable without needing a live Netlify environment.
 | `STRIPE_SECRET_KEY` | `create-checkout-session` | `PLACEHOLDER_STRIPE_SECRET_KEY` |
 
 Same names as the Command Center wizard writes to Cloudflare Secrets Store
-(`command-center/src/vendors.ts`) — `TWENTY_CRM_API_KEY` and `STRIPE_SECRET_KEY` specifically, so
-copying a value from there to a Netlify env var is a rename-free copy. `TWENTY_CRM_BASE_URL` and the
-three `N8N_..._WEBHOOK_URL` variables aren't vendor *secrets* (they're instance/endpoint URLs), so
-they're not in the wizard's Secrets Store list — set them directly as Netlify env vars once the
-Oracle box/n8n instance exists.
+(`command-center/src/vendors.ts`) — `TWENTY_CRM_API_KEY`, `TWENTY_CRM_BASE_URL`, and
+`STRIPE_SECRET_KEY` specifically. **As of this pass, that copy happens automatically** — once the
+wizard's Netlify API row (Personal Access Token + account slug + site ID) is connected, saving
+Twenty CRM or Stripe's Secret key in the wizard pushes it straight into this site's real Netlify
+env vars, no manual paste needed (`command-center/README.md`'s own "wizard now pushes credentials"
+section has the detail). The three `N8N_..._WEBHOOK_URL` variables still need setting by hand —
+they're endpoint paths on your own n8n instance, not a vendor credential the wizard collects at all.
 
 ## What's unverified
 

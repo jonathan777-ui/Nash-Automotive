@@ -1,6 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createSecret, type SecretsStoreEnv } from './secretsStore.js';
-import { VENDORS, type VendorDef } from './vendors.js';
+import { bindWorkerSecret } from './cfWorkerSecrets.js';
+import { upsertN8nCredential } from './pushTargets/n8nCredentials.js';
+import { setNetlifyEnvVar } from './pushTargets/netlifyEnv.js';
+import { VENDORS, type CredentialField, type VendorDef } from './vendors.js';
 import { escapeHtml } from './util.js';
 import { getAllStatuses, markConnected, type VendorStatus } from './status.js';
 import {
@@ -38,6 +41,20 @@ export interface Env extends SecretsStoreEnv {
    * call into n8n rather than only receiving pushes from it. Not a Secrets Store entry (an instance
    * URL, not a credential) - same treatment as N8N_INSTANCE_URL everywhere else in this repo. */
   N8N_INSTANCE_URL: string;
+  /** Must match wrangler.toml's own `name = "..."` - see cfWorkerSecrets.ts. A plain var, not a
+   * secret (it's not sensitive, just has to stay in sync with wrangler.toml if that ever changes). */
+  CF_WORKER_SCRIPT_NAME: string;
+  /** The following four are all OPTIONAL and all populated the same way: bound directly onto this
+   * Worker by cfWorkerSecrets.ts, the moment their vendor's `key: selfBind: true` field is saved
+   * through the wizard (see vendors.ts's `n8n`/`netlify-api` rows) - undefined until then, which is
+   * exactly the "not connected yet" signal handlePushTargets below checks for before attempting a
+   * push that depends on one. Not declared in wrangler.toml's [vars] - there's nothing to place a
+   * placeholder in ahead of time the way TEAM_DOMAIN/POLICY_AUD/etc. are, since these only start
+   * existing once bound at runtime. */
+  N8N_API_KEY?: string;
+  NETLIFY_ACCESS_TOKEN?: string;
+  NETLIFY_ACCOUNT_SLUG?: string;
+  NETLIFY_SITE_ID?: string;
 }
 
 const PLACEHOLDER_VALUES = new Set([
@@ -221,12 +238,70 @@ async function handleStatusSubmit(request: Request, env: Env): Promise<Response>
   return redirectWith(request, { saved: vendor.id });
 }
 
+/** The "push it to the component that needs it" half of the wizard - runs AFTER a field's value is
+ * already durably written to Secrets Store (the write this function is given never depends on
+ * anything here succeeding). Two independent things can happen per field, both best-effort and
+ * both reported back as a short status line rather than silently succeeding or failing:
+ *   1. selfBind - binds the value directly onto THIS Worker (cfWorkerSecrets.ts) so it becomes
+ *      readable as env.<secretName> on Command Center's own next request. Only set on the handful
+ *      of fields Command Center's own push logic needs to read back (n8n's API key, Netlify's
+ *      access token/site identifiers - see vendors.ts).
+ *   2. pushTargets - delivers the value to n8n (as a named Credential) and/or Netlify (as a site
+ *      env var), using whichever of the four env.N8N_API_KEY/NETLIFY_* fields are already bound.
+ *      A dependency that isn't bound YET (e.g. saving a Claude key before n8n's own key has ever
+ *      been saved) is reported as "not connected yet", not as a failure - saving the SAME field
+ *      again once n8n is connected will retry it, but nothing here loops or defers automatically.
+ * Exported for testing - this is the one piece of the wizard genuinely worth unit-testing in
+ * isolation, since it's the actual new behavior this pass adds. */
+export async function pushFieldValue(
+  env: Env,
+  field: CredentialField,
+  value: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[]> {
+  const notes: string[] = [];
+
+  if (field.selfBind) {
+    const bound = await bindWorkerSecret(env, { name: field.secretName, value }, fetchImpl);
+    notes.push(bound.ok ? `bound to this Worker for future pushes` : `could not bind to this Worker: ${bound.errorMessage}`);
+  }
+
+  if (field.pushTargets?.n8nCredential) {
+    const { name, type, buildData } = field.pushTargets.n8nCredential;
+    if (!env.N8N_API_KEY || !env.N8N_INSTANCE_URL || env.N8N_INSTANCE_URL === 'PLACEHOLDER_N8N_INSTANCE_URL') {
+      notes.push(`n8n not connected yet — "${name}" credential not pushed (save the n8n API key above first, then save this field again)`);
+    } else {
+      const result = await upsertN8nCredential(
+        { n8nInstanceUrl: env.N8N_INSTANCE_URL, n8nApiKey: env.N8N_API_KEY, fetchImpl },
+        { name, type, data: buildData(value) },
+      );
+      notes.push(result.ok ? `pushed to n8n as "${name}" (${result.updated ? 'updated' : 'created'})` : `n8n push failed: ${result.reason}`);
+    }
+  }
+
+  if (field.pushTargets?.netlifyEnvVar) {
+    const key = field.pushTargets.netlifyEnvVar;
+    if (!env.NETLIFY_ACCESS_TOKEN || !env.NETLIFY_ACCOUNT_SLUG || !env.NETLIFY_SITE_ID) {
+      notes.push(`Netlify not connected yet — ${key} not pushed (save the Netlify API access token above first, then save this field again)`);
+    } else {
+      const result = await setNetlifyEnvVar(
+        { accessToken: env.NETLIFY_ACCESS_TOKEN, accountSlug: env.NETLIFY_ACCOUNT_SLUG, siteId: env.NETLIFY_SITE_ID, fetchImpl },
+        { key, value },
+      );
+      notes.push(result.ok ? `pushed to Netlify as ${key}` : `Netlify push failed: ${result.reason}`);
+    }
+  }
+
+  return notes;
+}
+
 async function handleSecretsSubmit(request: Request, env: Env): Promise<Response> {
   const form = await request.formData();
   const vendorId = String(form.get('vendorId') ?? '');
   const vendor = VENDORS.find((v) => v.id === vendorId && v.authMode === 'manual');
   if (!vendor || !vendor.fields) return redirectWith(request, { error: `Unknown manual vendor: ${vendorId}` });
 
+  const pushNotes: string[] = [];
   for (const field of vendor.fields) {
     const value = String(form.get(`field__${field.key}`) ?? '').trim();
     if (!value) return redirectWith(request, { error: `${vendor.label}: ${field.label} was empty` });
@@ -235,10 +310,17 @@ async function handleSecretsSubmit(request: Request, env: Env): Promise<Response
     if (!result.ok) {
       return redirectWith(request, { error: `${vendor.label} (${field.label}): ${result.errorMessage ?? 'write failed'}` });
     }
+
+    // Best-effort, deliberately never fails the whole submission - the Secrets Store write above
+    // is already durable and complete; a push failing just means a manual copy is still needed
+    // for that one destination, same as before this pass existed at all.
+    for (const note of await pushFieldValue(env, field, value)) {
+      pushNotes.push(`${field.label}: ${note}`);
+    }
   }
 
   await markConnected(env.STATUS, vendor.id, 'manual');
-  return redirectWith(request, { saved: vendor.id });
+  return redirectWith(request, pushNotes.length ? { saved: vendor.id, pushInfo: pushNotes.join(' · ') } : { saved: vendor.id });
 }
 
 function renderVendorRow(vendor: VendorDef, status: VendorStatus | undefined): string {
@@ -293,11 +375,20 @@ function renderVendorRow(vendor: VendorDef, status: VendorStatus | undefined): s
 function renderPage(email: string, params: URLSearchParams, statuses: Map<string, VendorStatus>): string {
   const saved = params.get('saved');
   const error = params.get('error');
+  const pushInfo = params.get('pushInfo');
 
   let banner = '';
   if (saved) {
     const vendor = VENDORS.find((v) => v.id === saved);
     banner = `<div class="banner ok">${escapeHtml(vendor?.label ?? saved)} marked connected.</div>`;
+    if (pushInfo) {
+      // One line per field, "·"-joined by handleSecretsSubmit - re-split for a readable list rather
+      // than one long run-on sentence. A field whose only note is the plain Secrets Store write
+      // (no selfBind/pushTargets configured) never appears here at all - pushNotes only ever
+      // collects something when there was a push attempt to report on.
+      const lines = pushInfo.split(' · ').map((line) => `<div>${escapeHtml(line)}</div>`).join('');
+      banner += `<div class="banner ${pushInfo.includes('failed') || pushInfo.includes('not connected') ? 'warn' : 'ok'}" style="margin-top:-8px">${lines}</div>`;
+    }
   } else if (error) {
     banner = `<div class="banner err">${escapeHtml(error)}</div>`;
   }
@@ -328,6 +419,7 @@ function renderPage(email: string, params: URLSearchParams, statuses: Map<string
   .banner { border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 18px; }
   .banner.ok { background: rgba(45,212,191,.12); border: 1px solid rgba(45,212,191,.35); color: #7fe8db; }
   .banner.err { background: rgba(251,113,133,.12); border: 1px solid rgba(251,113,133,.35); color: #fda4af; }
+  .banner.warn { background: rgba(246,166,9,.12); border: 1px solid rgba(246,166,9,.35); color: #f6a609; }
   .row { border-top: 1px solid #1c2c42; padding: 14px 0; }
   h2:first-of-type + .row, h2 + .row:first-of-type { border-top: none; }
   .row-inner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

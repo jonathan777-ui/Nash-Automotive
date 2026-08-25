@@ -14,6 +14,13 @@ compatibility_date = "2026-08-22"
 # to write *other* credentials into Secrets Store, so it must be a plain Wrangler secret
 # (`wrangler secret put CF_API_TOKEN`), never sitting in Secrets Store itself or in this
 # plaintext config file.
+#
+# CF_API_TOKEN NEEDS ONE MORE SCOPE, new this pass: the credential wizard's push-to-n8n/Netlify
+# feature (src/cfWorkerSecrets.ts) uses this SAME token to bind secrets directly onto this Worker's
+# own script (Cloudflare's Workers Scripts API), which needs "Workers Scripts:Edit" permission in
+# ADDITION to whatever Secrets Store scope it already had. If you created CF_API_TOKEN before this
+# pass, edit it in the Cloudflare dashboard to add that permission rather than creating a second
+# token - see DEPLOY.md.
 [vars]
 TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
 POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
@@ -23,7 +30,16 @@ CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
 # the only place this Worker itself calls OUT to n8n rather than only receiving pushes from it
 # (POST {N8N_INSTANCE_URL}/webhook/tag-for-action). Same instance URL n8n's own workflow library
 # already assumes exists (workflows/README.md's credential-naming section) - set once, real.
+#
+# ALSO used by the credential wizard's push-to-n8n feature (new this pass, src/pushTargets/) - the
+# Instance URL was previously (wrongly) collected through the wizard's own "n8n" vendor form, which
+# wrote it into Secrets Store where nothing ever read it back; fixed by moving it here instead,
+# the one place this Worker's own code actually reads it from.
 N8N_INSTANCE_URL = "PLACEHOLDER_N8N_INSTANCE_URL"
+# Must match this file's own `name = "..."` at the top - used by the credential wizard's
+# self-bind mechanism (src/cfWorkerSecrets.ts) to know which script to bind a secret onto. Not a
+# secret itself, just has to stay in sync if this file's `name` ever changes.
+CF_WORKER_SCRIPT_NAME = "orbit-command-center"
 
 # Tracks per-vendor connection status (both CLI-auth confirmations and manual-paste writes) so
 # the checklist survives across visits. Actually provisioned already (via the Cloudflare MCP

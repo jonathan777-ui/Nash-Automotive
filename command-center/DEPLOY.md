@@ -107,7 +107,11 @@ This is the one credential that has to be pasted rather than CLI-authed — it's
 Secrets Store itself.
 
 1. Cloudflare dashboard → profile icon → **API Tokens** → **Create Token** → custom token with
-   **Account → Secrets Store → Edit** permission, scoped to this account.
+   **Account → Secrets Store → Edit** AND **Account → Workers Scripts → Edit** permissions, both
+   scoped to this account. (The second permission is new this pass — the credential wizard's
+   push-to-n8n/Netlify feature uses this same token to bind secrets directly onto this Worker's own
+   script; see `src/cfWorkerSecrets.ts`. If you already created this token before that feature
+   existed, edit it in the dashboard to add the permission rather than creating a second token.)
 2. `cd command-center && npx wrangler secret put CF_API_TOKEN` and paste it when prompted (this
    goes into the Worker's encrypted secret storage, not `wrangler.toml`, and never touches your
    shell history).
@@ -120,6 +124,16 @@ Edit `wrangler.toml`:
 CF_ACCOUNT_ID = "<your Cloudflare account ID, from the dashboard URL or `wrangler whoami`>"
 CF_SECRETS_STORE_ID = "<the store ID from step 6>"
 ```
+
+Once you actually stand up n8n (step 4 of the root `README.md`'s "Path to live"), also set:
+
+```toml
+N8N_INSTANCE_URL = "<your real n8n instance URL, e.g. https://n8n.your-domain.com>"
+```
+
+`CF_WORKER_SCRIPT_NAME` should already read `"orbit-command-center"`, matching this file's own
+`name = "..."` at the top — only touch it if you ever rename the Worker itself, and keep both in
+sync if you do.
 
 ```
 npx wrangler deploy
@@ -218,6 +232,26 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
    should `200` with `{"ok":true,"extension":1000}` on the very first call against a fresh
    `demo_extension_counter` row (already seeded live, see below), incrementing by one on each
    subsequent call regardless of caller — the counter is global, not scoped to a workflow run.
+8. **New this pass (the credential wizard's push-to-n8n/Netlify feature):**
+   1. Submit the **n8n** vendor form with a throwaway API key. The saved banner should show a
+      second line reading `bound to this Worker for future pushes` — that's the self-bind
+      succeeding (`src/cfWorkerSecrets.ts`), not the push itself (n8n doesn't have a credential to
+      receive yet).
+   2. Now submit **Anthropic Console (Claude API)** with a throwaway key. The saved banner should
+      show `pushed to n8n as "Claude API" (created)` if `N8N_INSTANCE_URL` is set for real and n8n
+      is actually reachable — or `n8n push failed: ...` with the real HTTP status/reason if n8n
+      rejects the request (a good sign the request reached n8n at all — check the credential type
+      schema in `src/pushTargets/n8nCredentials.ts`'s own header comment first, it's the most
+      likely thing to need correcting against your n8n version).
+   3. Submit **Netlify (API access, for auto-pushing env vars)** with a real Personal Access Token,
+      account slug, and site ID — same self-bind confirmation as step 1.
+   4. Submit **Stripe** — the Secret key field's banner should show `pushed to Netlify as
+      STRIPE_SECRET_KEY`. Check the portal's Netlify site (Site settings → Environment variables)
+      for a new/updated `STRIPE_SECRET_KEY` entry.
+   5. **If you submitted Claude/Twenty CRM/Telnyx/Stripe BEFORE n8n or Netlify were connected**,
+      their banners would have said "not connected yet" instead of pushing — re-submit the same
+      form (the same throwaway value is fine) now that the prerequisite is bound, and confirm the
+      push succeeds this time.
 
 The `alerts` table's `link_url`/`acknowledged_by`/`acknowledged_at`/`channel` columns, the
 `notifications`/`ai_action_requests` tables, and the new `demo_extension_counter` table (seeded at

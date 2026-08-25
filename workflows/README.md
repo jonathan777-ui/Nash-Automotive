@@ -405,12 +405,18 @@ lighter-weight way to close the gap.
 ## Credential naming — kept consistent with the Command Center
 
 Every workflow that needs a vendor credential references it by the same name the Command Center
-wizard writes to Cloudflare Secrets Store (`command-center/src/vendors.ts`), so wiring a real n8n
-instance up later is a rename-free copy: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY`,
-`TWENTY_CRM_API_KEY`, `PLUNK_API_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`,
-`STRIPE_WEBHOOK_SECRET`, `N8N_INSTANCE_URL`, `N8N_API_KEY`, and — new this pass, Phase 5 —
-`TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_SIP_DOMAIN`, `TELNYX_DEFAULT_FROM_NUMBER`,
-`TELNYX_DEMO_LINE_NUMBER`. **`DOCUMENSO_API_KEY` is gone** — brief
+wizard writes to Cloudflare Secrets Store (`command-center/src/vendors.ts`): `CLAUDE_API_KEY`,
+`GEMINI_API_KEY`, `GROK_API_KEY`, `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`, `PLUNK_API_KEY`,
+`STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `N8N_API_KEY`, and — new
+this pass, Phase 5 — `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_SIP_DOMAIN`,
+`TELNYX_DEFAULT_FROM_NUMBER`, `TELNYX_DEMO_LINE_NUMBER`. **This is no longer just a naming
+convention for a manual copy** — as of this pass, saving Twenty CRM/Claude/Telnyx's API key/Stripe's
+secret key through the wizard actually pushes the value into n8n (as a named Credential) and/or the
+portal on Netlify (as an env var) automatically, once those two are connected; see
+`command-center/README.md`'s "wizard now pushes credentials to where they're actually used" section
+for the mechanism and its real limits. `N8N_INSTANCE_URL` moved to a plain `wrangler.toml` var this
+pass too (a real bug fix — the wizard previously wrote it to Secrets Store, where nothing read it
+back). **`DOCUMENSO_API_KEY` is gone** — brief
 v2 moved Documenso out of the Phase 1 credential set entirely (see `phase-1-mvp/README.md`). Where a
 workflow needs a credential with no Secrets Store entry yet (e.g. the Places API key — see
 `src/server/README.md`), that's flagged the same way there.

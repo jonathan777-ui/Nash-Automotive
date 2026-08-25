@@ -1,0 +1,108 @@
+{
+  "name": "Orbit AI - Phase 3 - Load Campaign hopper (W3.2)",
+  "nodes": [
+    {
+      "id": "1bccf0b0-2959-4e2b-8d82-2b4abdb39666",
+      "name": "Load campaign webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-800, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hopper-load-campaign",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "REDEFINED this pass from the original catalog's 'Per-user isolated queue assignment' - that description contradicted the confirmed design (no multi-member campaign, a shared pool by default). This workflow is what actually loads a batch of Opportunities into a Campaign's hopper as queueable HopperEntry rows - see CRM-OBJECT-MODEL.md's Campaign/HopperEntry objects. Input contract: {campaignName, source, opportunityIds: string[]} - source is e.g. a scraper batch ID or niche selection, matching the brief's 'on-demand niche scraping' / 'dialer hopper async scrape' framing (05 Section 1/4)."
+    },
+    {
+      "id": "08508314-71f4-4d50-a0cc-09a4129c1254",
+      "name": "Create Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-560, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/campaigns",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.body.campaignName, source: $json.body.source }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "No membership/ownership set here on purpose - a Campaign is not gated to specific reps, confirmed explicitly ('no multi-member campaign'). Same Twenty CRM REST-shape uncertainty as every workflow in this library."
+    },
+    {
+      "id": "4e28b5d6-900c-434e-97d0-6c5578dc55d2",
+      "name": "Respond: campaign created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-320, -120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, campaignId: $json.id, entriesQueued: $('Load campaign webhook').item.json.body.opportunityIds.length }) }}"
+      },
+      "notes": "Responds as soon as the Campaign itself exists, not after every HopperEntry is created - the entry-creation loop (below) is fire-and-forget relative to this response, same reasoning as W1.6's Location-status-update branch: the caller doesn't need to block on N individual writes, and a partial failure there surfaces via this workflow's errorWorkflow alert, not a failed HTTP response."
+    },
+    {
+      "id": "de6c3eb0-3197-467d-bcd1-1aeccadc6541",
+      "name": "Split opportunityIds",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-320, 120],
+      "parameters": {
+        "fieldToSplitOut": "body.opportunityIds"
+      },
+      "notes": "Splits the webhook payload's opportunityIds array into one item per Opportunity to queue. Reads directly off the trigger node's own output (no upstream transform needed) since Create Campaign's response doesn't carry this array."
+    },
+    {
+      "id": "e337add5-ab86-4e60-83c0-205621df3617",
+      "name": "Create HopperEntry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-80, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ campaignId: $('Create Campaign').item.json.id, opportunityId: $json.body.opportunityIds, status: 'Available', attemptCountThisWave: 0, wave: 1 }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Runs once per split item - 'body.opportunityIds' on the split item is the single opportunity ID for this iteration (n8n's Split Out node keeps the same field name for the individual value, per the same pattern already used elsewhere in this library). Every entry starts wave 1, zero attempts, Available (unclaimed, in the shared pool)."
+    }
+  ],
+  "connections": {
+    "Load campaign webhook": {
+      "main": [[{ "node": "Create Campaign", "type": "main", "index": 0 }]]
+    },
+    "Create Campaign": {
+      "main": [
+        [
+          { "node": "Respond: campaign created", "type": "main", "index": 0 },
+          { "node": "Split opportunityIds", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Split opportunityIds": {
+      "main": [[{ "node": "Create HopperEntry", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -14,7 +14,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "notes": "Meant to be called right after post-call-synthesis.workflow.json produces a Disposition, to decide what happens to this record next. Input contract: {opportunityId, disposition, attemptCountThisWave, wave (1-4), lastAttemptDate}. ASSUMES the dialer/hopper (W3.1/W3.2, not built - schema depends on the scraper's own output) is the thing that actually tracks attemptCountThisWave and wave and passes them in here; this workflow is pure decision logic, not state storage."
+      "notes": "Meant to be called right after post-call-synthesis.workflow.json produces a Disposition, to decide what happens to this record's HopperEntry next. Input contract: {hopperEntryId, opportunityId, disposition, attemptCountThisWave, wave (1-4), lastAttemptDate, repId}. hopperEntryId + repId are new this pass (CRM-OBJECT-MODEL.md's HopperEntry object) - repId is who just took the call, needed so a Callback locks to the right rep."
     },
     {
       "id": "9593b9d9-d161-45ff-be23-04b314638364",
@@ -23,19 +23,64 @@
       "typeVersion": 2,
       "position": [-460, 0],
       "parameters": {
-        "jsCode": "// Numbers are the brief's own (05 Section 4), not invented: 6 attempts on no-answer, 4 on busy,\n// 8 on gatekeeper-only, hard-stop on opt-out, 4 waves total with 90-120 day gaps between waves.\nconst MAX_ATTEMPTS = { NoAnswer: 6, Busy: 4, GatekeeperOnly: 8 };\nconst MAX_WAVES = 4;\nconst RECYCLE_MIN_DAYS = 90;\nconst RECYCLE_MAX_DAYS = 120;\n\nconst input = $input.first().json.body;\nconst { disposition, attemptCountThisWave, wave, lastAttemptDate } = input;\n\nif (disposition === 'OptOut') {\n  return [{ json: { action: 'STOP', reason: 'Opt-out is a hard stop, no further attempts ever.' } }];\n}\n\nif (disposition && disposition.startsWith('Connected-')) {\n  return [{ json: { action: 'STOP', reason: 'Connected - this workflow only recycles no-contact dispositions.' } }];\n}\n\nconst cap = MAX_ATTEMPTS[disposition];\nif (cap === undefined) {\n  return [{ json: { action: 'REVIEW', reason: `Unrecognized disposition \"${disposition}\" - not in the attempt matrix, needs a human look rather than an automated guess.` } }];\n}\n\nif (attemptCountThisWave < cap) {\n  return [{ json: { action: 'RETRY_NOW', reason: `Attempt ${attemptCountThisWave + 1} of ${cap} for this wave.` } }];\n}\n\nif (wave >= MAX_WAVES) {\n  return [{ json: { action: 'STOP', reason: `Exhausted all ${MAX_WAVES} waves - no further recycling.` } }];\n}\n\nconst nextEligibleDate = new Date(lastAttemptDate);\nnextEligibleDate.setDate(nextEligibleDate.getDate() + RECYCLE_MIN_DAYS);\nconst windowEndDate = new Date(lastAttemptDate);\nwindowEndDate.setDate(windowEndDate.getDate() + RECYCLE_MAX_DAYS);\n\nreturn [{\n  json: {\n    action: 'RECYCLE_NEXT_WAVE',\n    nextWave: wave + 1,\n    eligibleFrom: nextEligibleDate.toISOString(),\n    eligibleUntil: windowEndDate.toISOString(),\n    reason: `Wave ${wave} exhausted at ${cap} attempts - recycles into wave ${wave + 1}, eligible ${RECYCLE_MIN_DAYS}-${RECYCLE_MAX_DAYS} days out.`,\n  },\n}];"
+        "jsCode": "// Numbers are the brief's own (05 Section 4), not invented: 6 attempts on no-answer, 4 on busy,\n// 8 on gatekeeper-only, hard-stop on opt-out, 4 waves total with 90-120 day gaps between waves.\nconst MAX_ATTEMPTS = { NoAnswer: 6, Busy: 4, GatekeeperOnly: 8 };\nconst MAX_WAVES = 4;\nconst RECYCLE_MIN_DAYS = 90;\nconst RECYCLE_MAX_DAYS = 120;\n\nconst input = $input.first().json.body;\nconst { disposition, attemptCountThisWave, wave, lastAttemptDate, repId } = input;\n\nif (disposition === 'OptOut') {\n  return [{ json: { action: 'STOP', hopperStatus: 'OptedOut', claimedByRepId: null, nextOwner: 'none', reason: 'Opt-out is a hard stop, no further attempts ever.' } }];\n}\n\n// Callback is its own top-level disposition (NOT a Connected- prefixed value) - see\n// CRM-OBJECT-MODEL.md's Callback vs. Try-back distinction. Personal/rep-locked: stays out of the\n// shared pool, only the rep who took the call sees it, until the promised time arrives.\nif (disposition === 'Callback') {\n  return [{\n    json: {\n      action: 'CALLBACK_SCHEDULED',\n      hopperStatus: 'CallbackLocked',\n      claimedByRepId: repId,\n      nextOwner: 'rep',\n      reason: 'Callback requested - locked to the rep who took the call until the promised time.',\n    },\n  }];\n}\n\nif (disposition && disposition.startsWith('Connected-')) {\n  return [{ json: { action: 'STOP', hopperStatus: 'Completed', claimedByRepId: null, nextOwner: 'none', reason: 'Connected - this workflow only recycles no-contact dispositions.' } }];\n}\n\nconst cap = MAX_ATTEMPTS[disposition];\nif (cap === undefined) {\n  return [{ json: { action: 'REVIEW', hopperStatus: null, claimedByRepId: repId, nextOwner: 'rep', reason: `Unrecognized disposition \"${disposition}\" - not in the attempt matrix, needs a human look rather than an automated guess. Left claimed by the calling rep rather than silently returned to the pool.` } }];\n}\n\n// Try-back (NoAnswer/Busy/GatekeeperOnly/VoicemailLeft, whichever is under its cap) - general\n// behavior, not a distinct disposition value: goes straight back into the SHARED pool, not held for\n// this rep. \"tryback are placed back in campaign hopper, keep leads being worked.\"\nif (attemptCountThisWave < cap) {\n  return [{ json: { action: 'RETRY_NOW', hopperStatus: 'Available', claimedByRepId: null, nextOwner: 'pool', reason: `Attempt ${attemptCountThisWave + 1} of ${cap} for this wave.` } }];\n}\n\nif (wave >= MAX_WAVES) {\n  return [{ json: { action: 'STOP', hopperStatus: 'Completed', claimedByRepId: null, nextOwner: 'none', reason: `Exhausted all ${MAX_WAVES} waves - no further recycling.` } }];\n}\n\nconst nextEligibleDate = new Date(lastAttemptDate);\nnextEligibleDate.setDate(nextEligibleDate.getDate() + RECYCLE_MIN_DAYS);\nconst windowEndDate = new Date(lastAttemptDate);\nwindowEndDate.setDate(windowEndDate.getDate() + RECYCLE_MAX_DAYS);\n\nreturn [{\n  json: {\n    action: 'RECYCLE_NEXT_WAVE',\n    hopperStatus: 'Available',\n    claimedByRepId: null,\n    nextOwner: 'pool',\n    nextWave: wave + 1,\n    eligibleFrom: nextEligibleDate.toISOString(),\n    eligibleUntil: windowEndDate.toISOString(),\n    reason: `Wave ${wave} exhausted at ${cap} attempts - recycles into wave ${wave + 1}, eligible ${RECYCLE_MIN_DAYS}-${RECYCLE_MAX_DAYS} days out, back in the shared pool (nextOwner: 'pool') once eligible.`,\n  },\n}];"
       },
-      "notes": "The one workflow in this library with real, brief-specified business logic encoded directly (not a placeholder) - the attempt caps and wave count are given numbers, not invented. Still not wired to anything live: nothing in this repo yet tracks attemptCountThisWave/wave/lastAttemptDate as real state (that's the hopper, W3.1/W3.2, not built), so this is correct decision logic waiting on a caller that has real state to hand it."
+      "notes": "The one workflow in this library with real, brief-specified business logic encoded directly (not a placeholder) - the attempt caps and wave count are given numbers, not invented. Every branch now also decides the HopperEntry's next state (hopperStatus/claimedByRepId/nextOwner) alongside the original human-readable action, since 'Write HopperEntry state' (below) needs a decision to persist, not just a decision to report back to the caller."
+    },
+    {
+      "id": "b578bb4a-ca49-4619-8372-f7d792dc5ff6",
+      "name": "Write HopperEntry state",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-260, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $('Next-attempt webhook').item.json.body.hopperEntryId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: $json.hopperStatus, claimedByRepId: $json.claimedByRepId, disposition: $('Next-attempt webhook').item.json.body.disposition, attemptCountThisWave: $('Next-attempt webhook').item.json.body.attemptCountThisWave, wave: $json.nextWave || $('Next-attempt webhook').item.json.body.wave, lastAttemptDate: $('Next-attempt webhook').item.json.body.lastAttemptDate, nextEligibleAt: $json.eligibleFrom || null }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "NEW this pass - previously this workflow only computed a decision and responded with it, it never persisted anything, because HopperEntry didn't exist as an object until this pass (CRM-OBJECT-MODEL.md). Skipped entirely for the REVIEW action's hopperStatus: null case below via the IF node, since there's nothing decided yet to write - a human needs to look at it first, and the entry stays exactly as claimed/Claimed in the meantime rather than being touched."
+    },
+    {
+      "id": "ebc5cace-8360-4134-9f60-5a6dfe96cc8c",
+      "name": "Needs a write?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-350, -140],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.hopperStatus }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "REVIEW (unrecognized disposition) sets hopperStatus: null on purpose - nothing safe to write yet, needs a human look first. Everything else always has a real hopperStatus to persist."
     },
     {
       "id": "9393c9b0-4c33-447d-98ed-4c7c6e24bf20",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [-220, 0],
+      "position": [40, 0],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}"
+        "responseBody": "={{ JSON.stringify($('Apply attempt matrix').item.json) }}"
       }
     }
   ],
@@ -44,6 +89,15 @@
       "main": [[{ "node": "Apply attempt matrix", "type": "main", "index": 0 }]]
     },
     "Apply attempt matrix": {
+      "main": [[{ "node": "Needs a write?", "type": "main", "index": 0 }]]
+    },
+    "Needs a write?": {
+      "main": [
+        [{ "node": "Write HopperEntry state", "type": "main", "index": 0 }],
+        [{ "node": "Respond", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write HopperEntry state": {
       "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
     }
   },

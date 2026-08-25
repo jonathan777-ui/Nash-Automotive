@@ -141,27 +141,36 @@ cataloged here so none of them are lost, not because any is hard.
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W3.1 | Dialer hopper request | Agent action (pull from pool / request scrape) | Auto (internal) | Documented only |
-| W3.2 | Per-user isolated queue assignment | Same as W3.1 | Auto (internal) | Documented only |
+| W3.1 | Dialer hopper request (claim next entry) | Agent action (pull from pool) | Auto (internal) | **Scaffolded** — `phase-3-dialer-hopper/hopper-request-next.workflow.json` |
+| W3.2 | Load Campaign hopper | Manual/scraper handoff (batch of Opportunities to dial) | Auto (internal) | **Scaffolded** — `phase-3-dialer-hopper/hopper-load-campaign.workflow.json` |
 | W3.3 | Attempt/recycling matrix | Post-call, per attempt | Auto (internal scheduling logic) | **Scaffolded**, with the brief's actual numbers hard-coded (not placeholders) — `phase-3-dialer-hopper/attempt-recycling-matrix.workflow.json` |
 | W3.4 | Post-call synthesis (strict 4-key JSON) | Call disposition event | Auto (internal — produces structured data, not an external send) | **Scaffolded**, using Claude Structured Outputs for the brief's exact 4-key contract — `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
 
 **Explicit correction already captured in the roadmap itself:** this phase is data/workflow layer
-only — no live call placement happens here (that's Phase 5, gated on Telnyx). Not scaffolded because
-the hopper's actual data model (what a "record" looks like, how a batch is defined) isn't specified
-independent of the scraper's own output schema (`04 - Scraper Deployment Scaffold`, a separate
-in-progress piece).
+only — no live call placement happens here (that's Phase 5, gated on Telnyx).
 
-**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded this pass.** Unusually well-specified for
-what had been "documented only" entries — the attempt matrix's actual numbers are given (6 attempts
-no-answer, 4 busy, 8 gatekeeper, hard-stop on opt-out, 4-wave 90-120 day recycling, hard-coded
-directly into the workflow rather than left as prose) and post-call synthesis's exact output
-contract is given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence, enforced
-via Claude's Structured Outputs). Neither is *wired to anything live* yet — both depend on the
-dialer's own call-event data existing first, which needs Telnyx (Phase 5) or at minimum the
-hopper/queue layer (W3.1/W3.2, still not built) generating real dispositions to react to — but the
-decision logic itself is real and ready, not blocked on a design question the way W3.1/W3.2 still
-are. See `phase-3-dialer-hopper/README.md`.
+**W3.1/W3.2 built this pass, once the hopper's actual model got locked in.** What had been blocking
+them wasn't the scraper's output schema after all — it was a design question: is the hopper a shared
+pool or per-rep isolated queues? Jonathan's answer (no multi-member campaign restriction; any
+available rep pulls from any active Campaign's shared hopper; a Callback disposition personally
+locks one record to one rep, every other non-connected disposition — Try-back — returns it to the
+shared pool) is now `CRM-OBJECT-MODEL.md`'s Campaign/HopperEntry objects, and both workflows are
+built against it: **W3.2** loads a batch of Opportunities into a Campaign as queueable HopperEntry
+rows; **W3.1** is the claim action a rep's dialer UI calls to pull the next eligible entry (a due
+personal Callback first, else the oldest-wave shared-pool candidate), with an explicitly flagged
+read-then-write race-condition risk (two reps could select the same entry before either claim lands)
+mitigated but not eliminated by a re-read-and-verify step. See `phase-3-dialer-hopper/README.md`.
+
+**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded last pass, extended this pass.** The
+attempt matrix's actual numbers are given by the brief (6 attempts no-answer, 4 busy, 8 gatekeeper,
+hard-stop on opt-out, 4-wave 90-120 day recycling) and post-call synthesis's exact output contract is
+given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence, enforced via Claude's
+Structured Outputs). **This pass:** W3.3 now also decides and persists the resulting HopperEntry
+state (`status`/`claimedByRepId`/`nextEligibleAt`, via a new PATCH node) instead of only computing
+and responding with a decision, and gained explicit `Callback` → `CALLBACK_SCHEDULED`/rep-locked
+handling distinct from the existing Try-back recycling actions; W3.4's Disposition enum swapped
+`Connected-CallbackRequested` for a plain top-level `Callback` value to match. Both are now wired to
+the real hopper (W3.1/W3.2) rather than waiting on it. See `phase-3-dialer-hopper/README.md`.
 
 ## Phase 4 — Intelligence Layer
 

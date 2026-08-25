@@ -1,0 +1,248 @@
+{
+  "name": "Orbit AI - Phase 3 - Request next hopper entry (W3.1)",
+  "nodes": [
+    {
+      "id": "a9055f6c-e2db-49aa-b935-b3855eb21d3c",
+      "name": "Request next webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hopper-request-next",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "The agent-facing 'give me the next lead to dial' action. Input contract: {repId: string, campaignId?: string} - campaignId is optional; when omitted, this pulls from the shared pool across every active Campaign (confirmed design: no multi-member campaign restriction, any available rep can pull from any campaign's hopper - see CRM-OBJECT-MODEL.md's Campaign object). A due Callback locked to this specific rep always takes priority over the shared pool - see 'Select candidate' below."
+    },
+    {
+      "id": "b4348ec1-ef3f-431a-ba4f-845f74395e0a",
+      "name": "Fetch due callbacks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, -100],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries?filter=status[eq]:CallbackLocked,claimedByRepId[eq]:{{ $('Request next webhook').item.json.body.repId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "This rep's own personal-hold Callback entries - status: 'CallbackLocked' means they're already removed from the shared pool and locked to whoever took that call (CRM-OBJECT-MODEL.md's Callback vs. Try-back distinction). 'Due' is decided client-side in 'Select candidate' below (nextEligibleAt <= now), not via a server-side date filter - Twenty CRM's filter-query support for date comparisons isn't confirmed, same REST-shape uncertainty as every workflow in this library."
+    },
+    {
+      "id": "863b9211-dfaa-4157-8802-53427c0bcbe3",
+      "name": "Fetch pool candidates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, -100],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries?filter=status[eq]:Available{{ $('Request next webhook').item.json.body.campaignId ? ',campaignId[eq]:' + $('Request next webhook').item.json.body.campaignId : '' }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The shared pool - every Available HopperEntry across every Campaign this rep isn't restricted from (i.e. all of them, per the no-membership design), optionally narrowed to one Campaign if the request named one. Chained after 'Fetch due callbacks' rather than run in parallel + merged, matching this library's established pattern of cross-referencing an earlier node's output via $('NodeName').item.json once an intermediate HTTP call has overwritten $json, instead of adding a Merge node for a two-input join."
+    },
+    {
+      "id": "15966421-382c-4206-b3a7-95471de64229",
+      "name": "Select candidate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, -100],
+      "parameters": {
+        "jsCode": "const now = new Date();\n\n// Twenty CRM's list-response shape is unconfirmed, same uncertainty as every REST call in this\n// library - tries a direct array first, falls back to a couple of plausible wrapper shapes.\nfunction asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.hopperEntries)) return json.data.hopperEntries;\n  if (json && Array.isArray(json.hopperEntries)) return json.hopperEntries;\n  return [];\n}\n\n// Due Callbacks win outright over the shared pool - a rep-promised callback is a commitment,\n// not just another queueable record (CRM-OBJECT-MODEL.md's Callback vs. Try-back distinction).\nconst dueCallbacks = $('Fetch due callbacks').all().flatMap(asArray)\n  .filter((e) => !e.nextEligibleAt || new Date(e.nextEligibleAt) <= now)\n  .sort((a, b) => new Date(a.nextEligibleAt || 0) - new Date(b.nextEligibleAt || 0));\n\nif (dueCallbacks.length > 0) {\n  return [{ json: { found: true, source: 'callback', entry: dueCallbacks[0] } }];\n}\n\n// Shared pool: oldest wave first, then longest-idle within that wave - recycled (Try-back) entries\n// with a future nextEligibleAt aren't eligible yet, same recycling window W3.3 computes.\nconst poolCandidates = $input.all().flatMap(asArray)\n  .filter((e) => !e.nextEligibleAt || new Date(e.nextEligibleAt) <= now)\n  .sort((a, b) => {\n    if (a.wave !== b.wave) return a.wave - b.wave;\n    return new Date(a.lastAttemptDate || 0) - new Date(b.lastAttemptDate || 0);\n  });\n\nif (poolCandidates.length > 0) {\n  return [{ json: { found: true, source: 'pool', entry: poolCandidates[0] } }];\n}\n\nreturn [{ json: { found: false } }];"
+      },
+      "notes": "Pure selection logic, no writes yet - picks one candidate (or none) from what the two fetches returned. The actual claim (and the race-condition risk that comes with it) happens in 'Claim HopperEntry' below, deliberately kept as a separate step so the read-decide and write-claim halves aren't tangled together."
+    },
+    {
+      "id": "14485230-5aea-4b90-bc44-afd623041f84",
+      "name": "Found a candidate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-440, -100],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8eb34a1b-0ebd-4c43-b91e-18b6fc38fa01",
+      "name": "Claim HopperEntry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, -180],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $json.entry.id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'Claimed', claimedByRepId: $('Request next webhook').item.json.body.repId }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "KNOWN CORRECTNESS GAP, flagged rather than silently shipped: this is a read-then-write claim over a generic REST API - 'Select candidate' read the entry as Available/due, but nothing stops two reps' requests from both selecting the SAME entry before either PATCH lands, since a plain PATCH has no server-side 'claim only if still Available' guarantee (no optimistic-concurrency/If-Match support confirmed on Twenty CRM's REST API). 'Verify claim' (next node) re-reads the entry after this write and rejects the claim if another rep's ID won the race, which shrinks the window a losing request can act on stale data but does not close it - closing it for real needs either a confirmed Twenty CRM conditional-update feature or a dedicated claim mutation outside plain REST semantics, neither of which exists to build against yet."
+    },
+    {
+      "id": "9fa4989e-fa03-443f-9d23-5122345aef2a",
+      "name": "Verify claim",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, -180],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $('Select candidate').item.json.entry.id }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Re-reads the entry post-claim so 'Won the claim?' can catch the case where a concurrent request's PATCH landed in between - see 'Claim HopperEntry's note on why this narrows, rather than eliminates, the race window."
+    },
+    {
+      "id": "8f57425e-1367-490c-9113-cd2aeae3532c",
+      "name": "Won the claim?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [280, -180],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.claimedByRepId }}",
+              "rightValue": "={{ $('Request next webhook').item.json.body.repId }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d6dc5db0-c411-40a6-b10d-c4b984a5ffb1",
+      "name": "Fetch Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -260],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Select candidate').item.json.entry.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The rep needs the actual lead/deal info to dial, not just the queue-mechanics HopperEntry row - see CRM-OBJECT-MODEL.md's 'Dialer hopper claim/queue state' row for why those two are deliberately separate objects."
+    },
+    {
+      "id": "07caf9b4-ff0e-46c8-b696-14a0b9b7bd59",
+      "name": "Respond: claimed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, -260],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, source: $('Select candidate').item.json.source, hopperEntry: $('Verify claim').item.json, opportunity: $json }) }}"
+      }
+    },
+    {
+      "id": "5a2adedf-51fa-4381-baab-e5ee10ab19e5",
+      "name": "Respond: lost race",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [520, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 409,
+        "responseBody": "={{ JSON.stringify({ ok: false, message: 'Another rep claimed this record first - request again.' }) }}"
+      },
+      "notes": "The losing side of the race flagged in 'Claim HopperEntry' - the caller (the dialer UI) is expected to just call this webhook again on a 409, which will select a different candidate now that this one shows Claimed."
+    },
+    {
+      "id": "8f5d0086-c933-4653-818d-c2b3590fa238",
+      "name": "Respond: hopper empty",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-200, 60],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, message: 'No eligible HopperEntry available for this rep right now.' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Request next webhook": {
+      "main": [[{ "node": "Fetch due callbacks", "type": "main", "index": 0 }]]
+    },
+    "Fetch due callbacks": {
+      "main": [[{ "node": "Fetch pool candidates", "type": "main", "index": 0 }]]
+    },
+    "Fetch pool candidates": {
+      "main": [[{ "node": "Select candidate", "type": "main", "index": 0 }]]
+    },
+    "Select candidate": {
+      "main": [[{ "node": "Found a candidate?", "type": "main", "index": 0 }]]
+    },
+    "Found a candidate?": {
+      "main": [
+        [{ "node": "Claim HopperEntry", "type": "main", "index": 0 }],
+        [{ "node": "Respond: hopper empty", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claim HopperEntry": {
+      "main": [[{ "node": "Verify claim", "type": "main", "index": 0 }]]
+    },
+    "Verify claim": {
+      "main": [[{ "node": "Won the claim?", "type": "main", "index": 0 }]]
+    },
+    "Won the claim?": {
+      "main": [
+        [{ "node": "Fetch Opportunity", "type": "main", "index": 0 }],
+        [{ "node": "Respond: lost race", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Opportunity": {
+      "main": [[{ "node": "Respond: claimed", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

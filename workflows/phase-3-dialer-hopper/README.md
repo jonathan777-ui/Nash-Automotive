@@ -116,6 +116,10 @@ response, same pattern as W1.6's Location-status-update branch. This doesn't tak
 external action itself, per the automation risk boundary — it only surfaces a possible violation for
 a human to review.
 
+**Also this pass:** now writes a `CommunicationsHubEntry` (new object, `CRM-OBJECT-MODEL.md`) for
+every call, fire-and-forget alongside the Opportunity field write — W2.5's Communications Hub
+write-through, Calls only (SMS/Social have no real integration to log from yet).
+
 **This pass — an important correctness change:** `call-wrap-up.workflow.json` (W3.6, new) makes the
 rep's own manually-entered Disposition authoritative, per Jonathan's explicit "user is required to
 enter Disposition type" instruction. This workflow's AI-inferred Disposition would otherwise silently

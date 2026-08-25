@@ -106,7 +106,7 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | **Scaffolded** — `phase-2-calendar-nurture-alerts/nurture-cadence.workflow.json` |
 | W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Company status = LiveClient + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | **Scaffolded** — `phase-2-calendar-nurture-alerts/cx-cadence.workflow.json` |
 | W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat + Command Center in-app (both real) + SMS on critical (still a placeholder — no provider in `02 - Launch Checklist`) — see that folder's README. |
-| W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
+| W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | **Scaffolded, Calls only** — new `CommunicationsHubEntry` object + a write-through node in `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
 | W2.7 | Compliant hours + off-hours consent gate (new, not in the brief's own numbering) | Permission check at the dialer action layer, alongside W2.6 | **Hard gate** — blocks outside TCPA-floor calling hours unless a system-checked + human-verified ConsentRecord is on file | **Scaffolded** — `phase-2-calendar-nurture-alerts/compliant-hours-consent-gate.workflow.json` |
 
@@ -143,11 +143,13 @@ Center's `/messaging` page instead of being dead-end notifications with no path 
 actually acts). See `phase-2-calendar-nurture-alerts/README.md` and `command-center/README.md`'s
 "Step 3" note: SMS still has no vendor anywhere in `02 - Launch Checklist`.
 
-**W2.5 (new, from CRM Architecture §13)** — "Communications Hub — custom object covering Calls/SMS/
-Social/Other, polymorphic to Person + Company + Opportunity — every touchpoint in one place
-regardless of channel." Not scaffolded: this needs the Communications Hub's own object schema built
-in Twenty CRM first (a custom object, not a standard one) before any workflow can write to it — a
-Twenty CRM configuration step, not something to guess the shape of from here.
+**W2.5 built this pass** — "Communications Hub — custom object covering Calls/SMS/Social/Other,
+polymorphic to Person + Location + Company + Opportunity — every touchpoint in one place regardless
+of channel" (`05 §13`). `CommunicationsHubEntry` (`CRM-OBJECT-MODEL.md`) is the object;
+`post-call-synthesis.workflow.json` (W3.4) writes one entry per completed call. **Calls only** —
+SMS/Social write-through isn't built because neither channel has a real sending/receiving
+integration anywhere in this repo yet (no SMS provider; no social integration named in the source
+docs at all) — there's nothing real to log from yet, not a schema gap.
 
 **W2.6 (new, from §5/§13) — the action-layer-block half scaffolded this pass.** The DNC list's
 source turned out to be identifiable after all: CRM Architecture §13's post-loss routing section
@@ -329,8 +331,10 @@ Still true and unaffected by the v4 object-model change:
   DNC overrides (W2.6) write into.
 - **DNC enforcement** (W2.6) and **post-loss routing** (W4.6) — confirmed still Opportunity-level;
   see each workflow's own notes for why.
-- **Communications Hub** (W2.5) and **Documents/Files** (W1.7) — still not built; now explicitly
-  polymorphic across the same four subject types as `comment_threads` per the note above.
+- **Communications Hub** (W2.5) — built, Calls only (see above); polymorphic across `person`/
+  `opportunity`/`location`/`company`, the exact four `05 §13` names (a distinct enum from
+  `comment_threads`'s own `SubjectType`, which also includes `lead`/`organization`).
+  **Documents/Files** (W1.7) — still not built.
 
 **Not built this pass, explicitly out of scope per the agreed sequencing:** the Contract Amendment
 Flow (superseding an existing Company's Contract, Accounting Audit Event, Deal stage → "Expansion")

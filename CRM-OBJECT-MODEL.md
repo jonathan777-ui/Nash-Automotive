@@ -263,6 +263,26 @@ Ticketing, Onboarding, CX, Contract renewal reminders).
   `missed-follow-up-check.workflow.json` (hourly sweep — "any scheduled touch overdue without
   disposition fires an alert," `05 §11`'s named `#missed-follow-ups` alert).
 
+### CommunicationsHubEntry (new this pass)
+`05 §13`: "Communications Hub — custom object covering Calls/SMS/Social/Other, polymorphic to
+Person + Location + Company + Opportunity — every touchpoint in one place regardless of channel."
+The single timeline a rep (or a future reporting view) reads to see every touchpoint on a record
+without hunting across the four other objects each channel's own logic actually writes to.
+
+- Fields: `id`, `subjectType` (`person` / `opportunity` / `location` / `company` — the exact four
+  the spec names; note this is a *different* enum from Command Center's own `comment_threads`
+  `SubjectType`, which also includes `lead`/`organization` for its own, unrelated polymorphism),
+  `subjectId`, `channel` (`Call` / `SMS` / `Social` / `Other`), `direction` (`Inbound` / `Outbound`),
+  `summary`, `occurredAt`, `relatedId` (nullable — e.g. the HopperEntry/call ID this call-channel
+  entry came from).
+- Assumed REST: `/rest/communicationsHubEntries`, `/rest/communicationsHubEntries/{id}`.
+- **Write-through built for Calls only this pass** — `post-call-synthesis.workflow.json` (W3.4) now
+  logs one entry per completed call, fire-and-forget alongside its existing Opportunity field write.
+  SMS/Social write-through isn't built: neither channel has a real sending/receiving integration
+  anywhere in this repo yet (no SMS provider — same gap `alert-dispatcher.workflow.json` already
+  flags; no social integration named anywhere in the source docs) — there's nothing real to log from
+  yet, not an oversight.
+
 ### Rep (Twenty CRM's native user / Workspace Member — extended, not a new object)
 Twenty CRM already has real user accounts for logged-in team members — this isn't a new custom
 object, it's that native user record with dialer-specific custom fields added on top. Needed once

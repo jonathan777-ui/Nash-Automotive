@@ -1,0 +1,167 @@
+{
+  "name": "Orbit AI - CRM Architecture - Deals Desk company/contract lookup (new, supports the Deals Desk UI)",
+  "nodes": [
+    {
+      "id": "11111111-2222-4333-8444-555566667777",
+      "name": "Deals Desk lookup webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "deals-desk-lookup",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "New this pass, built to support the Deals Desk UI (command-center's /deals-desk page). Input: {searchTerm?} for a name search returning a list, OR {companyId?} for one company's full detail (including its active Contract) - contract-amendment-flow.workflow.json's own notes have said since it was built that it's 'meant to be called by a rep action (Deals Desk, not built)' - this workflow is the read side that makes that rep action possible; contract-amendment-flow.workflow.json itself is the write side, unchanged."
+    },
+    {
+      "id": "22222222-3333-4444-8555-666677778888",
+      "name": "Has companyId?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.body.companyId }}", "rightValue": "", "operator": { "type": "string", "operation": "notEquals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "33333333-4444-4555-8666-777788889999",
+      "name": "Fetch Company by ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, -120],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies/{{ $json.body.companyId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Detail path - one specific Company, by ID, once a rep has picked one from search results."
+    },
+    {
+      "id": "44444444-5555-4666-8777-88889999aaaa",
+      "name": "Fetch active Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, -120],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts?filter=companyId[eq]:{{ $('Deals Desk lookup webhook').item.json.body.companyId }},status[eq]:Active",
+        "genericAuthType": "httpBearerAuth",
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same query health-scoring.workflow.json's 'Fetch active Contract' node uses - the Contract row this Company's amendment (if any is submitted next) will supersede. A Company with no active Contract (shouldn't normally happen for a LiveClient, but not assumed impossible) comes back as an empty list, handled in 'Build detail response' below rather than treated as an error."
+    },
+    {
+      "id": "55555555-6666-4777-8888-9999aaaabbbb",
+      "name": "Build detail response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-440, -120],
+      "parameters": {
+        "jsCode": "function unwrap(body, key) {\n  if (body && body.data && body.data[key] !== undefined) return body.data[key];\n  if (body && body.data !== undefined) return body.data;\n  return body;\n}\nfunction asArray(body, key) {\n  if (Array.isArray(body)) return body;\n  if (body && body.data && Array.isArray(body.data[key])) return body.data[key];\n  if (body && Array.isArray(body[key])) return body[key];\n  return [];\n}\n\nconst company = unwrap($('Fetch Company by ID').item.json, 'company');\nconst contracts = asArray($input.first().json, 'contracts');\nconst contract = contracts[0] || null;\n\nreturn [{ json: { ok: true, company, contract } }];"
+      }
+    },
+    {
+      "id": "66666666-7777-4888-8999-aaaabbbbcccc",
+      "name": "Respond: detail",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-200, -120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      }
+    },
+    {
+      "id": "77777777-8888-4999-8aaa-bbbbccccdddd",
+      "name": "Fetch LiveClient Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 120],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Search path - same query health-scoring.workflow.json/cx-cadence.workflow.json/pipeline-reporting-digest.workflow.json all use. Whole-table fetch, filtered client-side (next node) - same 'Twenty CRM's real filter support for a fuzzy name search isn't confirmed' discipline as every other list fetch in this repo; a name-substring server-side filter would be strictly better once confirmed possible."
+    },
+    {
+      "id": "88888888-9999-4aaa-8bbb-ccccddddeeee",
+      "name": "Filter by search term",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 120],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.companies)) return json.data.companies;\n  if (json && Array.isArray(json.companies)) return json.companies;\n  return [];\n}\n\nconst SEARCH_RESULTS_CAP = 10;\nconst term = ($('Deals Desk lookup webhook').item.json.body.searchTerm || '').trim().toLowerCase();\nconst all = $input.all().flatMap(asArray);\n\nconst matches = (term ? all.filter((c) => (c.name || '').toLowerCase().includes(term)) : all)\n  .slice(0, SEARCH_RESULTS_CAP)\n  .map((c) => ({ id: c.id, name: c.name, engagementScore: c.engagementScore ?? null, currentTier: c.currentTier ?? null }));\n\n// One item total, not one per match - the response is a single {companies: [...]} object, not\n// N separate items to merge back together (same reasoning pipeline-reporting-digest.workflow.json's\n// own notes give for avoiding an uncertain multi-input Merge node: simplest structure that still\n// gets the job done correctly). A blank searchTerm returns every LiveClient Company (capped), which\n// is a reasonable 'browse' behavior for an empty search box, not an error.\nreturn [{ json: { companies: matches } }];"
+      }
+    },
+    {
+      "id": "99999999-aaaa-4bbb-8ccc-ddddeeeeffff",
+      "name": "Respond: search results",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-440, 120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, companies: $json.companies }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Deals Desk lookup webhook": {
+      "main": [[{ "node": "Has companyId?", "type": "main", "index": 0 }]]
+    },
+    "Has companyId?": {
+      "main": [
+        [{ "node": "Fetch Company by ID", "type": "main", "index": 0 }],
+        [{ "node": "Fetch LiveClient Companies", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Company by ID": {
+      "main": [[{ "node": "Fetch active Contract", "type": "main", "index": 0 }]]
+    },
+    "Fetch active Contract": {
+      "main": [[{ "node": "Build detail response", "type": "main", "index": 0 }]]
+    },
+    "Build detail response": {
+      "main": [[{ "node": "Respond: detail", "type": "main", "index": 0 }]]
+    },
+    "Fetch LiveClient Companies": {
+      "main": [[{ "node": "Filter by search term", "type": "main", "index": 0 }]]
+    },
+    "Filter by search term": {
+      "main": [[{ "node": "Respond: search results", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -200,7 +200,11 @@ may hold Locations under completely different Contracts.
   auto-assignment," a global sequential counter starting at 1000, allocated by
   `demo-extension-auto-assign.workflow.json` via Command Center's `allocateDemoExtension`
   compare-and-swap loop the moment a demo finishes generating; lets a prospect call a shared Telnyx
-  number and dial their own extension to hear their specific AI receptionist demo).
+  number and dial their own extension to hear their specific AI receptionist demo), `phone` (real
+  gap found and fixed while building the Dialer UI — `src/company/types.ts`'s `CompanyProfile` and
+  the lead-intake payload both already carried a phone number, but nothing wrote it onto Location;
+  `dialer-place-call.workflow.json`'s `phoneNumber` input has a real source now instead of assuming
+  the caller has one from nowhere).
 - Assumed REST: `GET/POST/PATCH /rest/locations`, `/rest/locations/{id}`.
 - **Location Contract Lock**: `contractStatus` is the field every lock check reads. A NEW
   Contract-generation attempt on a Location that's already `ActiveM2M`/`ActiveTerm` from an

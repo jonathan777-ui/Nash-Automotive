@@ -1,0 +1,113 @@
+{
+  "name": "Orbit AI - Phase 3 - Rep lookup by email (new, supports the Dialer UI)",
+  "nodes": [
+    {
+      "id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b",
+      "name": "Rep lookup webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-900, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rep-lookup",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "New this pass, built to support the Dialer UI (command-center's /dialer page) - it knows the viewer's Cloudflare-Access-verified email but not their Twenty CRM Rep ID/sipExtension, and Command Center never talks to Twenty CRM directly (n8n is the sole integration point, same architecture Tag-for-Action already follows). Input: {email}."
+    },
+    {
+      "id": "f2a3b4c5-d6e7-4f8a-9b0c-1d2e3f4a5b6c",
+      "name": "Fetch Rep by email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-660, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/workspaceMembers?filter=email[eq]:{{ encodeURIComponent($json.body.email) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "REST-shape uncertainty flagged more prominently than usual here, per CRM-OBJECT-MODEL.md's own Rep section: 'genuinely uncertain which endpoint Twenty CRM's native user/member object lives at (/rest/workspaceMembers vs /rest/users vs something else)... confirm against a real instance before building the actual hopper-claim workflow's user-facing side.' This IS that user-facing side - /rest/workspaceMembers is this workflow's best guess, the single most likely thing in it to need correcting once a real Twenty CRM instance exists."
+    },
+    {
+      "id": "a3b4c5d6-e7f8-4a9b-ac0d-2e3f4a5b6c7d",
+      "name": "Found?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-420, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.workspaceMembers)) return json.data.workspaceMembers;\n  if (json && Array.isArray(json.workspaceMembers)) return json.workspaceMembers;\n  return [];\n}\n\nconst matches = $input.all().flatMap(asArray);\nif (matches.length === 0) return [{ json: { found: false } }];\n\nconst rep = matches[0];\nreturn [{\n  json: {\n    found: true,\n    rep: {\n      id: rep.id,\n      name: rep.name || rep.email,\n      sipExtension: rep.sipExtension || null,\n      dialerStatus: rep.dialerStatus || 'Offline',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "b4c5d6e7-f8a9-4bac-bd0e-3f4a5b6c7d8e",
+      "name": "Found rep?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-180, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.found }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c5d6e7f8-a9ba-4cbd-ae0f-4a5b6c7d8e9f",
+      "name": "Respond: found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [60, -80],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, rep: $json.rep }) }}"
+      }
+    },
+    {
+      "id": "d6e7f8a9-bacb-4dae-bf01-5a6b7c8d9e0f",
+      "name": "Respond: not found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [60, 80],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 404,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: 'No Rep/Workspace Member found for this email - an admin needs to set sipExtension on this user in Twenty CRM before they can use the dialer.' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Rep lookup webhook": {
+      "main": [[{ "node": "Fetch Rep by email", "type": "main", "index": 0 }]]
+    },
+    "Fetch Rep by email": {
+      "main": [[{ "node": "Found?", "type": "main", "index": 0 }]]
+    },
+    "Found?": {
+      "main": [[{ "node": "Found rep?", "type": "main", "index": 0 }]]
+    },
+    "Found rep?": {
+      "main": [
+        [{ "node": "Respond: found", "type": "main", "index": 0 }],
+        [{ "node": "Respond: not found", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

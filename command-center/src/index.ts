@@ -18,6 +18,8 @@ import {
   handleResolveAiAction,
   handleThreadPage,
 } from './messaging/routes.js';
+import { handleDialerPage, handleGetNextCall, handlePlaceCall, handleWrapUpCall } from './dialer/routes.js';
+import { handleAmendContract, handleDealsDeskPage } from './dealsDesk/routes.js';
 
 export interface Env extends SecretsStoreEnv {
   TEAM_DOMAIN: string;
@@ -153,6 +155,24 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/messaging/threads/comments') {
       return handlePostComment(request, env.MESSAGING_DB, access.email);
+    }
+    if (request.method === 'GET' && url.pathname === '/dialer') {
+      return handleDialerPage(request);
+    }
+    if (request.method === 'POST' && url.pathname === '/dialer/next') {
+      return handleGetNextCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL }, access.email);
+    }
+    if (request.method === 'POST' && url.pathname === '/dialer/place-call') {
+      return handlePlaceCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL });
+    }
+    if (request.method === 'POST' && url.pathname === '/dialer/wrap-up') {
+      return handleWrapUpCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL });
+    }
+    if (request.method === 'GET' && url.pathname === '/deals-desk') {
+      return handleDealsDeskPage(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL });
+    }
+    if (request.method === 'POST' && url.pathname === '/deals-desk/amend') {
+      return handleAmendContract(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL });
     }
     if (request.method === 'GET' && url.pathname === '/') {
       const statuses = await getAllStatuses(env.STATUS, VENDORS.map((v) => v.id));
@@ -334,7 +354,9 @@ function renderPage(email: string, params: URLSearchParams, statuses: Map<string
     <span class="badge">Checkpoint 3 · Full vendor checklist</span>
     <h1>Orbit Command Center</h1>
     <p class="sub">Signed in as ${escapeHtml(email)}. <span class="progress">${connectedCount}/${VENDORS.length} connected.</span>
-      &middot; <a href="/messaging" style="color:#7fe0ff">Team messaging (Piece 2)</a></p>
+      &middot; <a href="/messaging" style="color:#7fe0ff">Team messaging (Piece 2)</a>
+      &middot; <a href="/dialer" style="color:#7fe0ff">Dialer</a>
+      &middot; <a href="/deals-desk" style="color:#7fe0ff">Deals Desk</a></p>
     ${banner}
 
     <h2>CLI-auth — run locally, then confirm here</h2>

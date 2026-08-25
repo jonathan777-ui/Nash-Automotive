@@ -145,9 +145,13 @@ function pageShell(title: string, body: string, poll?: string): string {
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(title)} — Orbit Command Center</title>
-<style>${PAGE_STYLE}</style>
+<style>${PAGE_STYLE}
+  .top-nav { max-width: 960px; margin: 0 auto 12px; font-size: 12px; }
+  .top-nav a { color: #7fe0ff; text-decoration: none; margin-right: 14px; }
+</style>
 </head>
 <body>
+  <div class="top-nav"><a href="/">Home</a><a href="/messaging">Team messaging</a><a href="/dialer">Dialer</a><a href="/deals-desk">Deals Desk</a></div>
   <div class="shell">${body}</div>
   ${poll ? `<script>setInterval(() => { fetch(location.href).then(r => r.text()).then(html => {
     const doc = new DOMParser().parseFromString(html, 'text/html');

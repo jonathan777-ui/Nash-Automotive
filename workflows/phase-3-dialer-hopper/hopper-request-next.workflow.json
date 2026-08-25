@@ -234,14 +234,35 @@
       "notes": "The rep needs the actual lead/deal info to dial, not just the queue-mechanics HopperEntry row - see CRM-OBJECT-MODEL.md's 'Dialer hopper claim/queue state' row for why those two are deliberately separate objects."
     },
     {
+      "id": "b8e4f5a6-c7d8-4e9f-a0b1-c2d3e4f5a6b7",
+      "name": "Fetch primary Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -180],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ (($json.data || $json).locationIds || [])[0] }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New this pass, added while building the Dialer UI - the rep needs a phone number to actually dial, and Location (not Opportunity) is where 'phone' lives (CRM-OBJECT-MODEL.md, fixed this same pass). Only fetches the FIRST Location when an Opportunity spans several - a reasonable default for 'what number does the rep call,' not a considered multi-site dialing decision; a real multi-Location dial-order policy is out of scope here. neverError:true so a missing/empty locationIds array (an Opportunity with no resolved Location yet) degrades to an empty response rather than throwing - the claim itself already succeeded and shouldn't be undone by a Location fetch failing."
+    },
+    {
       "id": "07caf9b4-ff0e-46c8-b696-14a0b9b7bd59",
       "name": "Respond: claimed",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [760, -260],
+      "position": [1000, -260],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, source: $('Select candidate').item.json.source, hopperEntry: $('Verify claim').item.json, opportunity: $json }) }}"
+        "responseBody": "={{ JSON.stringify({ ok: true, source: $('Select candidate').item.json.source, hopperEntry: $('Verify claim').item.json, opportunity: $('Fetch Opportunity').item.json, location: ($('Fetch primary Location').item.json.data || $('Fetch primary Location').item.json) }) }}"
       }
     },
     {
@@ -313,6 +334,9 @@
       ]
     },
     "Fetch Opportunity": {
+      "main": [[{ "node": "Fetch primary Location", "type": "main", "index": 0 }]]
+    },
+    "Fetch primary Location": {
       "main": [[{ "node": "Respond: claimed", "type": "main", "index": 0 }]]
     }
   },

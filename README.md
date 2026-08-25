@@ -25,7 +25,9 @@ full: **Internal Team Messaging** (channels, @mentions, CRM comment threads, Tag
 real 11-channel alert taxonomy — `command-center/src/messaging/`), backed by a real, already-
 provisioned Cloudflare D1 database, plus **pipeline reporting** (a weekly funnel/revenue digest,
 `workflows/phase-6-reporting-support/pipeline-reporting-digest.workflow.json`) absorbing what was
-originally W6.1.
+originally W6.1, plus — new this pass — the **Deals Desk (`/deals-desk`) and Dialer (`/dialer`)
+pages** (`command-center/src/dealsDesk/`, `src/dialer/`), the rep-facing UI the entire Phase 3
+dialer-hopper backend and Contract Amendment Flow had been built waiting for.
 
 **Brief v2 update:** Front Door Audit added as a real, parallel-running piece; MVP e-sign is now a
 lightweight inline capture, not Documenso; Stripe moved from deferred into Phase 1 with placeholder
@@ -190,7 +192,7 @@ surface yet.
 
 Also see `workflows/` for the n8n automation library spanning the rest of the lead-to-onboarding
 pipeline (Phases 0-7 of `01 - Roadmap`) — this repo's pieces are nodes in that larger system, not
-the whole of it. **All seven phases now have real, scaffolded workflows** (43 `.workflow.json`
+the whole of it. **All seven phases now have real, scaffolded workflows** (45 `.workflow.json`
 files across `phase-0-infrastructure/` through `phase-6-reporting-support/`, plus a documented
 runbook for Phase 7's Twenty CRM self-host migration) — see `workflows/README.md`'s own catalog for
 the phase-by-phase detail, and the honest accounting below for what's genuinely still open.
@@ -212,7 +214,7 @@ here. In brief-recommended order:
    directory) with `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`, `STRIPE_SECRET_KEY`, and every
    `N8N_..._WEBHOOK_URL` the Netlify Functions in `portal/netlify/functions/` reference, set as real
    Netlify environment variables.
-4. **Stand up n8n on the Oracle box** and import all 43 workflows across `workflows/phase-0-*`
+4. **Stand up n8n on the Oracle box** and import all 45 workflows across `workflows/phase-0-*`
    through `workflows/phase-6-*` — each phase's own README already flags exactly what's likely to
    need hand-fixing on import (the Merge node in W1.1, the raw-body/signature path in the Stripe
    workflow, Telnyx's Call Control payload shape in Phase 5, and Twenty CRM's exact field names
@@ -231,11 +233,12 @@ here. In brief-recommended order:
 Everything above is genuinely code-complete pending credentials/import. What's **not** just a
 credentials gap, listed so it isn't confused with one:
 
-- **The Deals Desk / dialer UI** — no frontend anywhere in this repo actually calls
-  `hopper-request-next.workflow.json`, `dialer-place-call.workflow.json`, `call-wrap-up.workflow.json`,
-  or any of the compliance gates in sequence. Every backend piece those need is built and callable;
-  the softphone/UI layer that would call them in the right order, live, for a real rep, is not. By
-  far the largest remaining piece of work in this whole system.
+- **Live call audio** — `command-center`'s `/dialer` page (built this pass) calls
+  `hopper-request-next.workflow.json`, `dialer-place-call.workflow.json`, and
+  `call-wrap-up.workflow.json` in the right order for a real rep, but the actual call audio is
+  carried by the rep's own SIP softphone/desk-phone client (Telnyx bridges to `Rep.sipExtension`),
+  not embedded in the page — a real, common dialer-UI pattern, not a corner cut, but worth stating
+  plainly: this page shows and controls call metadata, it isn't a WebRTC softphone itself.
 - **Deep Dive Research and Front Door Audit as real services** — both are named-placeholder URLs
   throughout `workflows/phase-1-mvp/` and `phase-4-intelligence-layer/`. The brief names their output
   *shape* (a score, categories, a report) but not the actual scoring logic/categories themselves —

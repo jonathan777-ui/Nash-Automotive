@@ -27,8 +27,14 @@ are built now, plus the steady-state Billing Period rollover `05 §15` needs and
   before/after values, advances the driving Opportunity's stage to **`Expansion`** (a distinct bucket
   from the new-logo Won funnel, per spec), rolls the Billing Period over to the new Contract, and
   fires the `05 §11`-named "Contract Amendment logged" alert into `#accounting` (`05 §14`'s new
-  channel). Not yet called from anywhere in this repo — nothing here has a Deals Desk-style upsell UI
-  yet (see the tracked Deals Desk task); this is real, callable logic waiting on that caller.
+  channel). **Now has a real caller** — `command-center`'s `/deals-desk` page, built this pass (see
+  `command-center/README.md`), backed by a new `deals-desk-lookup.workflow.json` (below) for the
+  search/detail read side this write-only workflow never provided itself.
+- **`deals-desk-lookup.workflow.json`** (new, supports the Deals Desk UI) — the read side
+  `contract-amendment-flow.workflow.json` never had: a name search returning LiveClient Companies
+  (`{searchTerm}`), or one Company's full detail plus its active Contract (`{companyId}`). Two
+  responses, not a shared multi-item Merge — same reasoning `pipeline-reporting-digest.workflow.json`
+  gives for avoiding an uncertain multi-input Merge node elsewhere in this repo.
 - **`billing-period-rollover.workflow.json`** — schedule-triggered (daily), the third leg Billing
   Period needed: for every *unchanged* active Contract (not being amended), auto-creates the next
   monthly period once the current one's `periodEnd` passes. W1.6 creates period #1 on Won;

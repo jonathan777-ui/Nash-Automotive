@@ -110,7 +110,7 @@
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ name: $('Normalize lead fields').item.json.companyName, gbpUrl: $('Normalize lead fields').item.json.gbpUrl, websiteUrl: $('Normalize lead fields').item.json.websiteUrl, opportunityId: $('Normalize lead fields').item.json.opportunityId, contractStatus: 'None' }) }}",
+        "jsonBody": "={{ JSON.stringify({ name: $('Normalize lead fields').item.json.companyName, gbpUrl: $('Normalize lead fields').item.json.gbpUrl, websiteUrl: $('Normalize lead fields').item.json.websiteUrl, opportunityId: $('Normalize lead fields').item.json.opportunityId, contractStatus: 'None', phone: $('Normalize lead fields').item.json.phone }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -119,7 +119,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "contractStatus starts 'None' per CRM-OBJECT-MODEL.md - this is the field Location Contract Lock will check once that enforcement workflow is built (Step 2/3, not this pass). Same Twenty CRM REST-shape uncertainty as every workflow here."
+      "notes": "contractStatus starts 'None' per CRM-OBJECT-MODEL.md - this is the field Location Contract Lock will check once that enforcement workflow is built (Step 2/3, not this pass). Same Twenty CRM REST-shape uncertainty as every workflow here. REAL GAP FOUND AND FIXED while building the Dialer UI (Deals Desk/dialer task): phone was already normalized from the intake payload (see 'Normalize lead fields' above, unchanged since an earlier pass) but never actually written anywhere - CRM-OBJECT-MODEL.md's Location object didn't even list a phone field. Both fixed this pass; dialer-place-call.workflow.json's phoneNumber input can now come from a real place instead of assuming the caller has one from nowhere."
     },
     {
       "id": "5ccc24b7-aad1-4ae7-b261-5a6d97f639c9",

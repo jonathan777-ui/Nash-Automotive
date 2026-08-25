@@ -201,8 +201,42 @@ in Step 5 aren't included in that 5s poll either yet — same limitation, a full
 them). Steps 4 and 5 are both done, per the Status line above — see `workflows/README.md`'s Internal
 Team Messaging section for the original staged plan.
 
-Pipeline visibility/reporting and system health (the rest of Piece 2, absorbing Phase 6's W6.1)
-remain not started — lower priority, no brief-v2 urgency behind them the way messaging had.
+Pipeline visibility/reporting (the rest of Piece 2, absorbing Phase 6's W6.1) is now built as a
+weekly digest posted to `#accounting` (`workflows/phase-6-reporting-support/pipeline-reporting-digest.workflow.json`)
+rather than a live Command Center page — no brief-v2 urgency behind a real dashboard UI the way
+messaging had. System health remains not started.
+
+## Deals Desk + Dialer (new this pass — the Deals Desk/dialer UI task)
+
+Two new pages, `/dialer` and `/deals-desk`, closing what was by far the largest gap flagged
+throughout this whole build: every backend piece the dialer hopper (Phase 3) and Contract Amendment
+Flow needed was real and callable, but nothing in this repo actually called them in sequence for a
+live rep. Same architecture as everything else here — server-rendered HTML, no client-side
+framework, Cloudflare Access-gated — and the same "Command Center never talks to Twenty CRM
+directly" rule Tag-for-Action already follows: both pages call out to two small new n8n workflows
+(`rep-lookup.workflow.json`, `deals-desk-lookup.workflow.json`, `workflows/phase-3-dialer-hopper/`
+and `phase-1-mvp/`) rather than reading Twenty CRM themselves.
+
+- **`/dialer`** — Get next call (`hopper-request-next.workflow.json`, W3.1) → Place call
+  (`dialer-place-call.workflow.json`, Phase 5/W5.2 — gated by DNC/compliant-hours the moment the
+  rep actually dials, not before) → Call wrap-up (`call-wrap-up.workflow.json`, W3.6, required
+  before the next call can be claimed). The in-progress call's state round-trips through a single
+  base64-encoded `state=` query param between actions (no server-side session store), same encoding
+  Telnyx's own `client_state` mechanism already uses in `dialer-place-call.workflow.json` — a
+  pattern reused, not invented fresh for this page. A real gap found and fixed while building this:
+  Location never had a `phone` field anywhere in `CRM-OBJECT-MODEL.md`, even though the ingestion
+  pipeline (`src/company/types.ts`'s `CompanyProfile`) already carried one — now written at lead
+  intake and returned by `hopper-request-next.workflow.json`'s claim response.
+- **`/deals-desk`** — search LiveClient Companies → view one's active Contract → submit an
+  amendment (`contract-amendment-flow.workflow.json`, `05 §7/§13` — a new Contract version,
+  superseding the old one, never an edit in place). This is the exact "rep action (Deals Desk, not
+  built)" caller that workflow's own notes have named as missing since it was written.
+
+**Not built: real live-call audio.** The rep's own SIP softphone/desk-phone client (dialing their
+internal Telnyx extension, `Rep.sipExtension`) carries the actual call audio once Telnyx bridges the
+two legs — this page shows and controls call *metadata* (who to call, disposition, wrap-up), the
+same way many real-world dialer UIs work; it doesn't embed a WebRTC audio client, which would be a
+materially different, telephony-SDK-specific frontend task.
 
 ## Once deployed
 

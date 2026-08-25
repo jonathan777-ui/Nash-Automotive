@@ -87,6 +87,14 @@ by PATCHing `status: 'Claimed'`, `claimedByRepId`, then returns the HopperEntry 
 it points to (kept as two separate objects on purpose — see `CRM-OBJECT-MODEL.md`'s "Dialer hopper
 claim/queue state" row).
 
+**New this pass, built for the Dialer UI (`command-center`'s `/dialer` page):** the claim response
+now also fetches and returns the Opportunity's first Location (`Fetch primary Location`, new node)
+so the rep has an actual phone number to dial — a real gap found while building the UI: `phone` was
+already captured at lead intake but never written onto Location, and `CRM-OBJECT-MODEL.md` didn't
+even list the field. Both fixed this pass (see `lead-intake-to-demo-dashboard.workflow.json`'s own
+notes). Only the first Location is fetched when an Opportunity spans several — a reasonable default,
+not a considered multi-site dial-order policy.
+
 **Flagged, not silently ignored: a real race-condition risk.** Selecting a candidate and claiming it
 are a read-then-write pair over a plain REST API with no confirmed optimistic-concurrency support
 (no `If-Match`/conditional-PATCH on Twenty CRM's API). Two reps requesting at nearly the same moment
@@ -172,14 +180,26 @@ HopperEntry state to read and write instead of a caller with nowhere real to sen
 `call-wrap-up.workflow.json` (W3.6) is now the one caller, making the rep's own disposition, not an
 AI guess, the thing this workflow acts on.
 
+## `rep-lookup.workflow.json` (new, supports the Dialer UI)
+
+Resolves a Cloudflare-Access-verified email (what Command Center's `/dialer` page actually has) to a
+Twenty CRM Rep/Workspace Member record (`id`, `sipExtension`, `dialerStatus`) - Command Center never
+talks to Twenty CRM directly anywhere in this repo, so this is the read side of that boundary,
+same architecture Tag-for-Action already established. **Carries CRM-OBJECT-MODEL.md's own flagged
+uncertainty forward**: its own Rep section has said since it was written that the real REST endpoint
+for Twenty's native user object is unconfirmed (`/rest/workspaceMembers` vs `/rest/users`) - this
+workflow's `/rest/workspaceMembers` guess is the single most likely thing in it to need correcting
+against a real instance.
+
 ## What's still not built
 
 Nothing in Phase 3's own brief-numbered catalog. What Phase 3 depends on and doesn't build itself:
 real call placement and live call-event data is now built (Phase 5, `phase-5-telnyx-activation/` —
-Preview-mode only, against placeholder Telnyx credentials); still missing is the dialer UI/softphone
-layer that actually calls `dialer-place-call.workflow.json` (which in turn calls W3.1/W3.6/W3.3/W3.4/
-W3.5 and W2.6/W2.7's gates in sequence) — not part of this repo's n8n workflow library, tracked as
-the Deals Desk/dialer UI task, sequenced last — a real state/zip → timezone lookup for W2.7's
+Preview-mode only, against placeholder Telnyx credentials), and the dialer UI/softphone layer that
+calls `dialer-place-call.workflow.json` (which in turn calls W3.1/W3.6/W3.3/W3.4/W3.5 and W2.6/
+W2.7's gates in sequence) is now built too — `command-center`'s `/dialer` page, see
+`command-center/README.md`'s own section on it (including what it deliberately doesn't do: embed
+live call audio). Still open: a real state/zip → timezone lookup for W2.7's
 calling-hours check (currently server-local-hour, flagged as a known limitation in that workflow's
 own notes), reviving `FutureRework` HopperEntries into a new Campaign/wave 1 (parked, not automated —
 CRM-OBJECT-MODEL.md flags this explicitly), and Twenty CRM's real REST response shapes for

@@ -126,8 +126,9 @@ invisible in the UI, readable by anything that needs to know), and a new `Schedu
 alert trigger. `no-show-reengagement.workflow.json` (new) drafts (never sends — automation risk
 boundary) a rebooking outreach message via a real Claude call once a Demo touch is marked `NoShow`.
 None of the three are called from anywhere in this repo yet — they're real, callable logic waiting
-on their callers (a Deals Desk-style UI to disposition touches, and every other workflow that should
-be scheduling through this layer instead of nothing at all today).
+on their callers (a UI to disposition scheduled touches — distinct from the `/deals-desk` and
+`/dialer` pages built this pass, neither of which schedules calendar events — and every other
+workflow that should be scheduling through this layer instead of nothing at all today).
 
 **W2.2/W2.3 built this pass.** The message *content* still isn't brief-specified (only CX's timing
 is — 7/30/60/90-day then quarterly, `05 §9`, encoded verbatim; nurture's timing is this pass's own
@@ -436,8 +437,12 @@ is a second new env var that workflow needs, also with no Secrets Store entry.
 - **`CRM-OBJECT-MODEL.md`** (repo root) — the canonical object-hierarchy reference every other file
   below points back to instead of re-deriving it. Start here for "what object does X anchor to."
 - `command-center/` — Piece 1, gathers these credentials in the first place; also now Piece 2's
-  Internal Team Messaging (`src/messaging/`). Updated for v2: Stripe added to the vendor checklist,
-  Documenso removed. Updated for v4: `comment_threads` migrated to polymorphic subjects.
+  Internal Team Messaging (`src/messaging/`), pipeline reporting (absorbed into a scheduled digest,
+  Phase 6), and — new this pass — the **Deals Desk (`/deals-desk`) and Dialer (`/dialer`) pages**,
+  the real callers `contract-amendment-flow.workflow.json` and the whole Phase 3 dialer hopper +
+  Phase 5 live-call stack had been waiting on since they were built. Updated for v2: Stripe added to
+  the vendor checklist, Documenso removed. Updated for v4: `comment_threads` migrated to polymorphic
+  subjects.
 - `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 or v4 —
   none of the changes touch the KB demo generator's own scope.
 - `portal/` — the client-facing portal (W1.3-W1.6's real UI + backend). Its two fully functional
@@ -451,8 +456,11 @@ is a second new env var that workflow needs, also with no Secrets Store entry.
   for W4.3, live call-event data for W3.3/W3.4 — still are. Where a number genuinely wasn't decided
   (W4.3's referral thresholds), it's a named placeholder rather than an invented default, same
   pattern as every credential in this repo.
-- Everything else here (Deep Dive Research, Front Door Audit, the Demo Dashboard/CRM write targets,
-  nurture/CX content, health scoring, Telnyx activation, the dialer hopper itself) is **new scope
-  this library surfaces but doesn't build** — cataloged so nothing named in the roadmap gets
-  silently lost, with each "Documented only" / "Not started" entry stating exactly what's blocking
-  it from being scaffolded for real.
+- What's left genuinely unbuilt, not just uncredentialed — **Deep Dive Research and Front Door
+  Audit as real services** (their scoring logic/categories aren't specified anywhere), and **the
+  three demo-rendering surfaces** consuming `UnifiedKb` output — is new scope this library surfaces
+  but doesn't build, cataloged so nothing named in the roadmap gets silently lost. Telnyx activation
+  and the dialer hopper itself are no longer in that category: both are scaffolded (Phase 3, Phase 5,
+  and `command-center`'s `/dialer` page), against placeholder Telnyx credentials and Preview-mode
+  calling only — see the root `README.md`'s own "Honest final accounting" section for the current,
+  complete list of what's actually still open.

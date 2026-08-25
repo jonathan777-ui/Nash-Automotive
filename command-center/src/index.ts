@@ -5,11 +5,16 @@ import { escapeHtml } from './util.js';
 import { getAllStatuses, markConnected, type VendorStatus } from './status.js';
 import {
   handleAcknowledgeAlert,
+  handleAiActionRequestsIngest,
   handleAlertsIngest,
   handleCreateChannel,
+  handleMarkNotificationRead,
   handleMessagingPage,
+  handleNotificationsIngest,
   handlePostComment,
   handlePostMessage,
+  handlePostTagForAction,
+  handleResolveAiAction,
   handleThreadPage,
 } from './messaging/routes.js';
 
@@ -21,8 +26,15 @@ export interface Env extends SecretsStoreEnv {
   MESSAGING_DB: D1Database;
   /** A plain Wrangler secret (`wrangler secret put ALERTS_INGEST_SECRET`), same treatment as
    * CF_API_TOKEN — n8n's alert-dispatcher workflow authenticates to /api/alerts with this,
-   * since it can't complete an interactive Cloudflare Access login. */
+   * since it can't complete an interactive Cloudflare Access login. Also gates /api/notifications
+   * and /api/ai-action-requests (Tag-for-Action's delivery-layer ingest endpoints, new this pass) -
+   * same trust boundary, not a separate secret. */
   ALERTS_INGEST_SECRET: string;
+  /** The n8n instance's base URL - Command Center calls OUT to it for Tag-for-Action
+   * (POST {N8N_INSTANCE_URL}/webhook/tag-for-action), the one place this Worker itself initiates a
+   * call into n8n rather than only receiving pushes from it. Not a Secrets Store entry (an instance
+   * URL, not a credential) - same treatment as N8N_INSTANCE_URL everywhere else in this repo. */
+  N8N_INSTANCE_URL: string;
 }
 
 const PLACEHOLDER_VALUES = new Set([
@@ -95,6 +107,12 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/alerts') {
       return handleAlertsIngestAuthed(request, env);
     }
+    if (request.method === 'POST' && url.pathname === '/api/notifications') {
+      return withMachineAuth(request, env, () => handleNotificationsIngest(request, env.MESSAGING_DB));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/ai-action-requests') {
+      return withMachineAuth(request, env, () => handleAiActionRequestsIngest(request, env.MESSAGING_DB));
+    }
 
     const access = await verifyAccess(request, env);
     if (!access.ok) return access.response;
@@ -106,10 +124,19 @@ export default {
       return handleStatusSubmit(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/messaging') {
-      return handleMessagingPage(request, env.MESSAGING_DB);
+      return handleMessagingPage(request, env.MESSAGING_DB, access.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/alerts/acknowledge') {
       return handleAcknowledgeAlert(request, env.MESSAGING_DB, access.email);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/tag-for-action') {
+      return handlePostTagForAction(request, env.N8N_INSTANCE_URL, access.email);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/notifications/read') {
+      return handleMarkNotificationRead(request, env.MESSAGING_DB, access.email);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/ai-actions/resolve') {
+      return handleResolveAiAction(request, env.MESSAGING_DB, access.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/channels') {
       return handleCreateChannel(request, env.MESSAGING_DB);
@@ -135,6 +162,14 @@ export default {
 };
 
 export async function handleAlertsIngestAuthed(request: Request, env: Env): Promise<Response> {
+  return withMachineAuth(request, env, () => handleAlertsIngest(request, env.MESSAGING_DB));
+}
+
+/** Shared bearer-token check for every machine-to-machine ingest route n8n calls (alerts,
+ * notifications, ai-action-requests) - factored out this pass rather than copy-pasted a third time,
+ * since Tag-for-Action added two more routes needing the exact same check handleAlertsIngestAuthed
+ * already did inline. */
+async function withMachineAuth(request: Request, env: Env, handler: () => Promise<Response>): Promise<Response> {
   const authHeader = request.headers.get('Authorization') ?? '';
   const expected = `Bearer ${env.ALERTS_INGEST_SECRET}`;
   if (!env.ALERTS_INGEST_SECRET || env.ALERTS_INGEST_SECRET === 'PLACEHOLDER_ALERTS_INGEST_SECRET' || authHeader !== expected) {
@@ -143,7 +178,7 @@ export async function handleAlertsIngestAuthed(request: Request, env: Env): Prom
       headers: { 'content-type': 'application/json' },
     });
   }
-  return handleAlertsIngest(request, env.MESSAGING_DB);
+  return handler();
 }
 
 function redirectWith(request: Request, params: Record<string, string>): Response {

@@ -65,6 +65,20 @@ workflow's `settings.errorWorkflow` field (currently `PLACEHOLDER_ALERT_WORKFLOW
 whole library) to point at it — that's a one-time manual step after import, not something fixable
 from this sandbox.
 
+## `tag-for-action.workflow.json` (new, not brief-W-numbered — Command Center Step 5)
+
+`05 §14`'s Tag-for-Action mechanism, the n8n side: logs a `TagForAction` Activity Event on Twenty
+CRM regardless of target, then branches. A **human** target gets a personal notification via
+Command Center's `/api/notifications` (the actionable delivery — see `command-center/README.md`'s
+Step 5 note). An **AI-employee** target gets classified against a small reversible-action set
+(summarize/research/draft-only, anything unrecognized defaults to gated) — **reversible** calls
+Claude for real and delivers the answer back as a notification immediately; **gated** creates a
+pending `ai_action_requests` row instead of calling Claude at all, requiring a human's
+Approve/Reject on `/messaging` before anything happens — "external-send/billing/irreversible = same
+human-approval gate regardless of trigger," per spec. Not built: actually executing an *approved*
+gated action (Approve/Reject today only changes status), and AI-to-AI channel posting (needs a
+running AI-agent loop this repo doesn't have).
+
 ## W2.6 — `dnc-check.workflow.json` (the action-layer-block half only)
 
 The other half of W2.6 — role-based hiding of DNC'd contacts in the dialer UI — is a Twenty CRM

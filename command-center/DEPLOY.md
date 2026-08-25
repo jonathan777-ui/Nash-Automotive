@@ -198,11 +198,28 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
    it should redirect back to `/messaging` and the row should now read "✓ Acknowledged by
    <your Access email>" instead of showing the button. Click it again (or have a second person try)
    and confirm it stays attributed to the first acknowledger, not reassigned.
+5. **New this pass (Step 4 — the real 11-channel taxonomy):** the channel list on the left should
+   show all 11 real channels (`new-leads`, `demos`, `dialer`, `nurture`, `portal-conversion`,
+   `onboarding`, `cx-retention`, `missed-follow-ups`, `system-alerts`, `ai-agents`, `accounting`),
+   not a placeholder "general" channel. Post an alert with `"source":"stripe-payment-to-crm"` and
+   confirm it shows up under `#portal-conversion` specifically (both in that channel's own view and
+   the sidebar), not just the flat recent-alerts list.
+6. **New this pass (Step 5 — Tag-for-Action):** on any channel, use the "Tag for Action" form to tag
+   `a@b.com` (target type "teammate") with action `follow-up` and a note — confirm the request
+   succeeds (redirects back) and, once `N8N_INSTANCE_URL` is set for real and
+   `tag-for-action.workflow.json` is imported, a notification shows up. Separately, tag
+   `ai-employee` (target type "AI-employee") with action `summarize` and a note — once real
+   `CLAUDE_API_KEY`/`TWENTY_CRM_API_KEY` credentials exist in n8n, this should produce an AI response
+   notification within seconds. Tag `ai-employee` with an unrecognized action (e.g. `send-email`)
+   and confirm it shows up instead under "AI actions awaiting approval" — click Reject and confirm
+   it disappears from that list without anything having been sent.
 
-The `alerts` table's three new columns (`link_url`, `acknowledged_by`, `acknowledged_at`) were
-applied directly to the live D1 database via the Cloudflare MCP tools this pass — no manual
-`ALTER TABLE` needed on your end, same "actually do it with the live tools available" discipline as
-the table's original creation.
+The `alerts` table's `link_url`/`acknowledged_by`/`acknowledged_at`/`channel` columns, and the new
+`notifications`/`ai_action_requests` tables, were all applied directly to the live D1 database via
+the Cloudflare MCP tools across these passes — no manual `ALTER TABLE`/`CREATE TABLE` needed on your
+end, same "actually do it with the live tools available" discipline as the schema's original
+creation. One new env var to set for real once n8n exists: `N8N_INSTANCE_URL` (plain, not a secret —
+see `wrangler.toml`), the base URL Command Center calls out to for Tag-for-Action.
 
 If any of this doesn't work as expected, tell me what happened — the D1 query patterns
 (`src/messaging/db.ts`) were written against D1's documented API but not exercised against the real

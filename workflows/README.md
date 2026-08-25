@@ -335,14 +335,16 @@ external channel W2.4 dispatches system alerts to — Google Chat, per Jonathan'
 receiving them regardless; this is a distinct, in-app surface on top, and W2.4 now delivers to both
 (see `alert-dispatcher.workflow.json`'s "Send to Command Center (in-app)" node).
 
-**Built this pass, ahead of the brief's own "not urgent" sequencing** — `command-center/src/messaging/`
-(channels/messages/@mentions, comment threads keyed by `opportunityId`, an `/api/alerts` ingest
-endpoint), backed by a real, already-provisioned Cloudflare D1 database (not a placeholder — same
+**Built ahead of the brief's own "not urgent" sequencing** — `command-center/src/messaging/`
+(channels/messages/@mentions, comment threads keyed by `(subjectType, subjectId)`, alert ingest +
+delivery), backed by a real, already-provisioned Cloudflare D1 database (not a placeholder — same
 "actually create it with the live tools available" treatment the `STATUS` KV namespace got in
 Piece 1). Real-time delivery is 5-second polling, not a WebSocket/Durable Object — simple, testable,
-and enough for a "not urgent" internal tool; noted as a natural v2 upgrade, not built now. Full
-detail: `command-center/README.md`'s "Piece 2 — Internal Team Messaging" section and
-`command-center/DEPLOY.md` step 11.
+and enough for a "not urgent" internal tool; noted as a natural v2 upgrade, not built now. **Steps
+3-5 (alert-surface priority, the real 11-channel taxonomy, Tag-for-Action) are now all done** — see
+`command-center/README.md`'s "Piece 2 — Internal Team Messaging" section for the full detail and
+`command-center/DEPLOY.md` step 11 for how to verify each. Tag-for-Action's n8n side is
+`phase-2-calendar-nurture-alerts/tag-for-action.workflow.json` (new, not brief-W-numbered).
 
 Pipeline visibility/reporting (the rest of Piece 2, absorbing W6.1) remains not started — no
 brief-v2 urgency behind it the way messaging had.

@@ -19,6 +19,11 @@ TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
 POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
 CF_ACCOUNT_ID = "PLACEHOLDER_CLOUDFLARE_ACCOUNT_ID"
 CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
+# Not a secret - the n8n instance's own base URL. New this pass (Tag-for-Action, 05 §14 Step 5):
+# the only place this Worker itself calls OUT to n8n rather than only receiving pushes from it
+# (POST {N8N_INSTANCE_URL}/webhook/tag-for-action). Same instance URL n8n's own workflow library
+# already assumes exists (workflows/README.md's credential-naming section) - set once, real.
+N8N_INSTANCE_URL = "PLACEHOLDER_N8N_INSTANCE_URL"
 
 # Tracks per-vendor connection status (both CLI-auth confirmations and manual-paste writes) so
 # the checklist survives across visits. Actually provisioned already (via the Cloudflare MCP

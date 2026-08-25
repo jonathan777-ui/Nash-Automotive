@@ -3,18 +3,26 @@ import { channelForSource } from './alertRouting.js';
 import { parseMentions } from './mentions.js';
 import {
   acknowledgeAlert,
+  createAiActionRequest,
   createChannel,
+  createNotification,
   getOrCreateThread,
   listAlertsForChannel,
   listChannels,
   listComments,
   listMessages,
+  listNotificationsFor,
+  listPendingAiActionRequests,
   listRecentAlerts,
+  markNotificationRead,
   postComment,
   postMessage,
   recordAlert,
+  resolveAiActionRequest,
+  type AiActionRequest,
   type Alert,
   type D1Like,
+  type Notification,
   type SubjectType,
 } from './db.js';
 
@@ -52,6 +60,19 @@ const PAGE_STYLE = `
   .alert-row .ack-form { margin-top: 4px; }
   .alert-row .ack-form button { padding: 3px 9px; font-size: 11px; }
   .alert-row .acked { display: inline-block; margin-top: 4px; font-size: 11px; color: #7fe8db; }
+  .notif-row { border-top: 1px solid #1c2c42; padding: 8px 0; font-size: 12px; }
+  .notif-row.unread { color: #eaf3fb; }
+  .notif-row:not(.unread) { color: #52688a; }
+  .notif-row form { display: inline; margin-left: 6px; }
+  .notif-row form button { padding: 2px 7px; font-size: 10px; }
+  .ai-action-row { border-top: 1px solid #1c2c42; padding: 8px 0; font-size: 12px; }
+  .ai-action-row .badge-ai { display: inline-block; font-size: 10px; letter-spacing: .04em;
+         text-transform: uppercase; color: #c9a7ff; border: 1px solid rgba(201,167,255,.4);
+         border-radius: 999px; padding: 1px 7px; margin-right: 6px; }
+  .ai-action-row .resolve-form { display: flex; gap: 6px; margin-top: 6px; }
+  .ai-action-row .resolve-form button { padding: 3px 9px; font-size: 11px; }
+  .btn-reject { background: #0a1422; color: #fda4af; border: 1px solid rgba(251,113,133,.35); }
+  .hint { color: #52688a; font-size: 11px; }
   .empty { color: #52688a; font-size: 13px; }
 `;
 
@@ -80,6 +101,43 @@ function renderAlertRow(a: Alert): string {
   </div>`;
 }
 
+/** Tag-for-Action (05 §14) — Step 5: the "personal notification" a human-to-human or human-to-AI
+ * tag delivers. Unread rows render brighter; a "Mark read" button is the only action needed here -
+ * the actual tag content (the note, the record it's about) already IS the notification's summary,
+ * there's no separate detail page to click through to. */
+function renderNotificationRow(n: Notification): string {
+  const unread = !n.readAt;
+  const link = n.linkUrl ? `<a href="${escapeHtml(n.linkUrl)}" target="_blank" rel="noopener">Open →</a> ` : '';
+  const markRead = unread
+    ? `<form method="post" action="/messaging/notifications/read">
+         <input type="hidden" name="notificationId" value="${escapeHtml(n.id)}">
+         <button type="submit" class="secondary">Mark read</button>
+       </form>`
+    : '';
+  return `<div class="notif-row ${unread ? 'unread' : ''}">
+    ${escapeHtml(n.summary)} ${link}${markRead}
+  </div>`;
+}
+
+/** Tag-for-Action's human-approval gate for an @AI-employee tag classified external-send/billing/
+ * irreversible (05 §14: "same human-approval gate regardless of trigger" as any other AI-employee
+ * action of that class) - Approve/Reject here is the ONLY way one of these ever executes; nothing
+ * in this codebase auto-approves. Visible to anyone with Command Center Access, since there's no
+ * role/permission system built yet (same limitation already flagged for the messaging page overall)
+ * - worth gating to admins specifically once Twenty CRM's real role model exists to key off. */
+function renderAiActionRow(r: AiActionRequest): string {
+  return `<div class="ai-action-row">
+    <span class="badge-ai">AI request</span>${escapeHtml(r.action)} — ${escapeHtml(r.note)}
+    ${r.opportunityId ? `<br><span class="hint">Opportunity ${escapeHtml(r.opportunityId)}</span>` : ''}
+    <br><span class="hint">Requested by ${escapeHtml(r.requestedByEmail)}</span>
+    <form class="resolve-form" method="post" action="/messaging/ai-actions/resolve">
+      <input type="hidden" name="requestId" value="${escapeHtml(r.id)}">
+      <button type="submit" name="decision" value="approve">Approve</button>
+      <button type="submit" name="decision" value="reject" class="btn-reject">Reject</button>
+    </form>
+  </div>`;
+}
+
 function pageShell(title: string, body: string, poll?: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -98,7 +156,7 @@ function pageShell(title: string, body: string, poll?: string): string {
 </html>`;
 }
 
-export async function handleMessagingPage(request: Request, db: D1Like): Promise<Response> {
+export async function handleMessagingPage(request: Request, db: D1Like, viewerEmail: string): Promise<Response> {
   const url = new URL(request.url);
   const channels = await listChannels(db);
   const activeId = url.searchParams.get('channel') ?? channels[0]?.id;
@@ -106,6 +164,8 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
   const alerts = await listRecentAlerts(db, 10);
   const activeChannel = channels.find((c) => c.id === activeId);
   const channelAlerts = activeChannel ? await listAlertsForChannel(db, activeChannel.name, 10) : [];
+  const notifications = await listNotificationsFor(db, viewerEmail, 10);
+  const pendingAiActions = await listPendingAiActionRequests(db, 10);
 
   const sidebar = `
     <div class="card">
@@ -122,6 +182,22 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
         <input type="text" name="name" placeholder="new-channel-name" required>
         <button type="submit">+</button>
       </form>
+      <h1 style="margin-top:24px">🔔 Your notifications</h1>
+      <div id="notifications">
+        ${
+          notifications.length
+            ? notifications.map((n) => renderNotificationRow(n)).join('')
+            : '<span class="empty">Nothing tagged to you.</span>'
+        }
+      </div>
+      <h1 style="margin-top:24px">AI actions awaiting approval</h1>
+      <div id="ai-actions">
+        ${
+          pendingAiActions.length
+            ? pendingAiActions.map((r) => renderAiActionRow(r)).join('')
+            : '<span class="empty">None pending.</span>'
+        }
+      </div>
       <h1 style="margin-top:24px">Recent alerts</h1>
       <div id="alerts">
         ${
@@ -160,6 +236,18 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
                <input type="hidden" name="channelId" value="${escapeHtml(activeChannel.id)}">
                <input type="text" name="body" placeholder="Message (use @name to mention)" required>
                <button type="submit">Send</button>
+             </form>
+             <h1 style="margin-top:20px">Tag for Action</h1>
+             <form class="compose" method="post" action="/messaging/tag-for-action" style="flex-wrap:wrap">
+               <select name="targetType" style="background:#0a1422;border:1px solid #1c2c42;border-radius:8px;color:#eaf3fb;padding:8px 10px;font-size:13px">
+                 <option value="human">@ a teammate</option>
+                 <option value="ai">@ AI-employee</option>
+               </select>
+               <input type="text" name="targetIdentifier" placeholder="username or email" required>
+               <input type="text" name="action" placeholder="action (e.g. follow-up, draft-email)" required>
+               <input type="text" name="opportunityId" placeholder="Opportunity ID (optional)">
+               <input type="text" name="note" placeholder="note" required>
+               <button type="submit">Tag</button>
              </form>`
           : ''
       }
@@ -308,5 +396,136 @@ export async function handleAcknowledgeAlert(request: Request, db: D1Like, autho
   if (!alertId) return new Response('Missing alertId.', { status: 400 });
 
   await acknowledgeAlert(db, alertId, authorEmail);
+  return Response.redirect(new URL('/messaging', request.url).toString(), 303);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tag-for-Action (05 §14) — Step 5
+// ---------------------------------------------------------------------------------------------
+
+/** The compose form's target: the durable record + AI classification/execution live in
+ * tag-for-action.workflow.json (n8n) — same "every CRM write goes through n8n" architecture as
+ * everything else in this repo. Command Center's own job is just collecting the form and forwarding
+ * it server-to-server; n8n calls back into the two ingest endpoints below for the delivery layer
+ * (a human's personal notification, or an AI-employee's pending-approval request). Best-effort,
+ * fire-and-forget toward n8n — same as every other non-blocking write in this repo, a real failure
+ * surfaces via that workflow's own errorWorkflow alert, not by blocking this redirect. */
+export async function handlePostTagForAction(request: Request, n8nInstanceUrl: string, taggedByEmail: string): Promise<Response> {
+  const form = await request.formData();
+  const targetType = String(form.get('targetType') ?? '');
+  const targetIdentifier = String(form.get('targetIdentifier') ?? '').trim();
+  const action = String(form.get('action') ?? '').trim();
+  const opportunityId = String(form.get('opportunityId') ?? '').trim() || null;
+  const note = String(form.get('note') ?? '').trim();
+
+  if ((targetType !== 'human' && targetType !== 'ai') || !targetIdentifier || !action || !note) {
+    return new Response(
+      'Tag for Action requires targetType (human/ai), targetIdentifier, action, and note.',
+      { status: 400 },
+    );
+  }
+
+  try {
+    await fetch(`${n8nInstanceUrl || 'PLACEHOLDER_N8N_INSTANCE_URL'}/webhook/tag-for-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetType, targetIdentifier, action, opportunityId, note, taggedByEmail }),
+    });
+  } catch {
+    // n8n unreachable (placeholder URL, instance down) - don't fail the whole request over a
+    // fire-and-forget forward; the tag is lost in that case, which is an honest limitation of a
+    // best-effort call, not silently pretended to have worked.
+  }
+
+  return Response.redirect(new URL('/messaging', request.url).toString(), 303);
+}
+
+export interface NotificationIngestBody {
+  recipientEmail: string;
+  summary: string;
+  linkUrl?: string;
+}
+
+/** Not gated by Cloudflare Access, same reasoning as handleAlertsIngest - tag-for-action.workflow.json
+ * calls this machine-to-machine and can't complete an interactive Access login. Reuses
+ * ALERTS_INGEST_SECRET rather than adding a second Wrangler secret - same trust boundary (any n8n
+ * workflow authenticated to write into this Worker), no reason to fragment it. */
+export async function handleNotificationsIngest(request: Request, db: D1Like): Promise<Response> {
+  let body: Partial<NotificationIngestBody>;
+  try {
+    body = (await request.json()) as Partial<NotificationIngestBody>;
+  } catch {
+    return new Response(JSON.stringify({ ok: false, reason: 'Invalid JSON body.' }), { status: 400 });
+  }
+
+  if (typeof body.recipientEmail !== 'string' || typeof body.summary !== 'string') {
+    return new Response(
+      JSON.stringify({ ok: false, reason: 'Body must be {recipientEmail, summary} (strings).' }),
+      { status: 400 },
+    );
+  }
+  if (body.linkUrl !== undefined && typeof body.linkUrl !== 'string') {
+    return new Response(JSON.stringify({ ok: false, reason: 'linkUrl, if present, must be a string.' }), { status: 400 });
+  }
+
+  await createNotification(db, body.recipientEmail, body.summary, body.linkUrl ?? null);
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+export interface AiActionRequestIngestBody {
+  action: string;
+  note: string;
+  requestedByEmail: string;
+  opportunityId?: string;
+}
+
+/** Same machine-to-machine, ALERTS_INGEST_SECRET-gated pattern as the notification ingest above -
+ * this is where an @AI-employee tag classified external-send/billing/irreversible lands, per 05
+ * §14's human-approval gate. */
+export async function handleAiActionRequestsIngest(request: Request, db: D1Like): Promise<Response> {
+  let body: Partial<AiActionRequestIngestBody>;
+  try {
+    body = (await request.json()) as Partial<AiActionRequestIngestBody>;
+  } catch {
+    return new Response(JSON.stringify({ ok: false, reason: 'Invalid JSON body.' }), { status: 400 });
+  }
+
+  if (typeof body.action !== 'string' || typeof body.note !== 'string' || typeof body.requestedByEmail !== 'string') {
+    return new Response(
+      JSON.stringify({ ok: false, reason: 'Body must be {action, note, requestedByEmail} (strings).' }),
+      { status: 400 },
+    );
+  }
+  if (body.opportunityId !== undefined && typeof body.opportunityId !== 'string') {
+    return new Response(JSON.stringify({ ok: false, reason: 'opportunityId, if present, must be a string.' }), { status: 400 });
+  }
+
+  const created = await createAiActionRequest(db, body.action, body.note, body.requestedByEmail, body.opportunityId ?? null);
+  return new Response(JSON.stringify({ ok: true, id: created.id }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+/** Human-facing, Access-gated - marks one of the viewer's OWN notifications read (markNotificationRead
+ * is scoped to recipientEmail, so this can't be used to touch someone else's). */
+export async function handleMarkNotificationRead(request: Request, db: D1Like, viewerEmail: string): Promise<Response> {
+  const form = await request.formData();
+  const notificationId = String(form.get('notificationId') ?? '');
+  if (!notificationId) return new Response('Missing notificationId.', { status: 400 });
+
+  await markNotificationRead(db, notificationId, viewerEmail);
+  return Response.redirect(new URL('/messaging', request.url).toString(), 303);
+}
+
+/** Human-facing, Access-gated - Approve/Reject on a pending AI action request. This IS the human-
+ * approval gate 05 §14 requires for an external-send/billing/irreversible AI-employee action;
+ * nothing else in this codebase can move a request out of 'pending'. */
+export async function handleResolveAiAction(request: Request, db: D1Like, resolvedByEmail: string): Promise<Response> {
+  const form = await request.formData();
+  const requestId = String(form.get('requestId') ?? '');
+  const decision = String(form.get('decision') ?? '');
+  if (!requestId || (decision !== 'approve' && decision !== 'reject')) {
+    return new Response('Missing requestId or invalid decision (must be approve/reject).', { status: 400 });
+  }
+
+  await resolveAiActionRequest(db, requestId, resolvedByEmail, decision === 'approve');
   return Response.redirect(new URL('/messaging', request.url).toString(), 303);
 }

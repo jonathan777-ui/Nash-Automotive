@@ -242,3 +242,141 @@ export async function acknowledgeAlert(db: D1Like, id: string, byEmail: string):
     .run()) as { meta?: { changes?: number } } | undefined;
   return (result?.meta?.changes ?? 0) > 0;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Tag-for-Action (05 §14) — Step 5. "@username (or @AI-employee) + action + company (autocomplete),
+// OR Opportunity ID paste + @target + note. Human-to-human: personal notification + action button,
+// logs to Activity Event. Human-to-AI: same mechanism — read-only/reversible = immediate response,
+// external-send/billing/irreversible = same human-approval gate regardless of trigger." The durable
+// record (the Activity Event itself) is written by tag-for-action.workflow.json directly to Twenty
+// CRM, same pattern as every other Activity Event write in this repo (dnc-check's override log,
+// contract-amendment-flow's audit event) — these two tables are Command Center's own DELIVERY
+// layer: a personal notification a human target actually sees, and the pending-approval queue an
+// AI-employee's gated action sits in until a human clears it.
+// ---------------------------------------------------------------------------------------------
+
+export interface Notification {
+  id: string;
+  recipientEmail: string;
+  summary: string;
+  linkUrl: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/** The "personal notification" half of Tag-for-Action's human-to-human/human-to-AI mechanism —
+ * written by tag-for-action.workflow.json (machine-to-machine, same POST /api/notifications +
+ * shared-secret pattern as POST /api/alerts) whenever the target is a real person (or an AI
+ * response/approval-request comes back and someone needs to see it). */
+export async function createNotification(
+  db: D1Like,
+  recipientEmail: string,
+  summary: string,
+  linkUrl: string | null = null,
+): Promise<Notification> {
+  const notification: Notification = { id: newId(), recipientEmail, summary, linkUrl, createdAt: nowIso(), readAt: null };
+  await db
+    .prepare('INSERT INTO notifications (id, recipient_email, summary, link_url, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(notification.id, notification.recipientEmail, notification.summary, notification.linkUrl, notification.createdAt)
+    .run();
+  return notification;
+}
+
+/** Unread-first, most recent first - a viewer's own notifications, scoped to their Access-verified
+ * email so one person never sees another's personal tags. */
+export async function listNotificationsFor(db: D1Like, recipientEmail: string, limit = 20): Promise<Notification[]> {
+  const { results } = await db
+    .prepare(
+      'SELECT id, recipient_email AS recipientEmail, summary, link_url AS linkUrl, created_at AS createdAt, ' +
+        'read_at AS readAt FROM notifications WHERE recipient_email = ? ' +
+        'ORDER BY (read_at IS NOT NULL), created_at DESC LIMIT ?',
+    )
+    .bind(recipientEmail, limit)
+    .all<Notification>();
+  return results;
+}
+
+/** Scoped to the recipient, not just the id - a notification is only markable-read by the person it
+ * was actually sent to, not by anyone who happens to know its id. */
+export async function markNotificationRead(db: D1Like, id: string, recipientEmail: string): Promise<boolean> {
+  const result = (await db
+    .prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND recipient_email = ? AND read_at IS NULL')
+    .bind(nowIso(), id, recipientEmail)
+    .run()) as { meta?: { changes?: number } } | undefined;
+  return (result?.meta?.changes ?? 0) > 0;
+}
+
+export interface AiActionRequest {
+  id: string;
+  action: string;
+  opportunityId: string | null;
+  note: string;
+  requestedByEmail: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolvedByEmail: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+/** The human-approval gate for an @AI-employee tag classified as external-send/billing/irreversible
+ * — per 05 §14, "same human-approval gate regardless of trigger" as any other AI-employee action of
+ * that class (the automation risk boundary this whole repo has followed since checkpoint 1).
+ * Written by tag-for-action.workflow.json; NEVER auto-resolved by anything in this codebase. */
+export async function createAiActionRequest(
+  db: D1Like,
+  action: string,
+  note: string,
+  requestedByEmail: string,
+  opportunityId: string | null = null,
+): Promise<AiActionRequest> {
+  const request: AiActionRequest = {
+    id: newId(),
+    action,
+    opportunityId,
+    note,
+    requestedByEmail,
+    status: 'pending',
+    resolvedByEmail: null,
+    resolvedAt: null,
+    createdAt: nowIso(),
+  };
+  await db
+    .prepare(
+      'INSERT INTO ai_action_requests (id, action, opportunity_id, note, requested_by_email, status, created_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    )
+    .bind(request.id, request.action, request.opportunityId, request.note, request.requestedByEmail, request.status, request.createdAt)
+    .run();
+  return request;
+}
+
+export async function listPendingAiActionRequests(db: D1Like, limit = 20): Promise<AiActionRequest[]> {
+  const { results } = await db
+    .prepare(
+      'SELECT id, action, opportunity_id AS opportunityId, note, requested_by_email AS requestedByEmail, status, ' +
+        'resolved_by_email AS resolvedByEmail, resolved_at AS resolvedAt, created_at AS createdAt ' +
+        "FROM ai_action_requests WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?",
+    )
+    .bind(limit)
+    .all<AiActionRequest>();
+  return results;
+}
+
+/** Only resolves a still-pending request (WHERE status = 'pending') - a second click (or a race
+ * between two reviewers) can't flip an already-decided request. Returns false, not an error, when
+ * that happens - same "honest about what happened, caller doesn't have to branch on it" shape as
+ * acknowledgeAlert above. */
+export async function resolveAiActionRequest(
+  db: D1Like,
+  id: string,
+  resolvedByEmail: string,
+  approved: boolean,
+): Promise<boolean> {
+  const result = (await db
+    .prepare(
+      "UPDATE ai_action_requests SET status = ?, resolved_by_email = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
+    )
+    .bind(approved ? 'approved' : 'rejected', resolvedByEmail, nowIso(), id)
+    .run()) as { meta?: { changes?: number } } | undefined;
+  return (result?.meta?.changes ?? 0) > 0;
+}

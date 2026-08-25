@@ -91,10 +91,42 @@ on real credentials" discipline as everything else here.
 
 **Status after the v4 review (`06 - Recent Changes Summary`):** the foundation (D1 schema, auth
 routing, polling UI) holds up, but the first pass was built against Opportunity-only anchoring and a
-free-form channel model, both of which v4 supersedes. Jonathan's requested sequence: object model
-(done), alert-surface priority inversion (done — Step 3), fixed 11-channel taxonomy (**done this
-pass — Step 4**), Tag-for-Action rebuilt properly (Step 5, see below) — see `CRM-OBJECT-MODEL.md`
-and `workflows/README.md` for the full comparison and plan.
+free-form channel model, both of which v4 supersedes. Jonathan's requested sequence — object model,
+alert-surface priority inversion (Step 3), fixed 11-channel taxonomy (Step 4), Tag-for-Action rebuilt
+properly (Step 5) — is **now fully done.** See `CRM-OBJECT-MODEL.md` and `workflows/README.md` for
+the full comparison and plan.
+
+**Step 5 — Tag-for-Action rebuilt for real, done this pass.** `05 §14`'s actual mechanism: "@username
+(or @AI-employee) + action + company (autocomplete), OR Opportunity ID paste + @target + note.
+Human-to-human: personal notification + action button, logs to Activity Event. Human-to-AI: same
+mechanism — read-only/reversible = immediate response, external-send/billing/irreversible = same
+human-approval gate regardless of trigger." The old `@mention` highlighting in `mentions.ts` was
+cosmetic only, not this — it's untouched, still just chat-message styling; Tag-for-Action is a whole
+new mechanism sitting alongside it:
+
+- **A real compose form** on `/messaging` (target type, target identifier, action, optional
+  Opportunity ID, note) — `POST /messaging/tag-for-action` forwards it server-to-server to
+  `tag-for-action.workflow.json` (n8n, new), which logs the durable Activity Event on Twenty CRM.
+- **Human target → a personal notification.** New `notifications` D1 table (live, created via the
+  Cloudflare MCP tools) + `POST /api/notifications` ingest (same machine-to-machine,
+  `ALERTS_INGEST_SECRET`-gated pattern as `/api/alerts`, factored into a shared `withMachineAuth`
+  helper this pass). Rendered in the sidebar, scoped to the viewer's own Access-verified email —
+  one person never sees another's tags.
+- **AI target → classified, then routed.** `tag-for-action.workflow.json` classifies the requested
+  action against a small reversible-action set (summarize/research/draft-only); anything not
+  recognized defaults to gated, erring toward human approval rather than risking an
+  accidental auto-execute. **Reversible** calls Claude for real (same credential/header pattern as
+  W3.4's post-call synthesis) and delivers the answer back as a notification, immediately.
+  **Gated** creates a new `ai_action_requests` row (live D1 table) instead of calling Claude at
+  all — visible in a new "AI actions awaiting approval" panel with Approve/Reject buttons
+  (`POST /messaging/ai-actions/resolve`), the actual human-approval gate `05 §14` requires. Nothing
+  in this codebase can move a gated request out of `pending` except that click.
+- **Not built:** actually *executing* an approved gated action (e.g. really sending a drafted
+  email) — Approve/Reject today only changes the request's status; resuming and executing after
+  approval needs its own mechanism this repo doesn't have, flagged rather than faked. AI-to-AI
+  ("posts into relevant topic channel, visually distinguished from human messages") also isn't
+  built — that's system-to-system chatter between running AI agents, not a single request/response
+  call the way Tag-for-Action's human-to-AI path is.
 
 **Step 4 — the real 11-channel taxonomy, done this pass.** `05 §14` gives the exact channel map, not
 a free-form model: `#new-leads`, `#demos`, `#dialer`, `#nurture`, `#portal-conversion`,
@@ -121,7 +153,8 @@ that channel's alerts above the chat thread — previously every alert only ever
   literal typed handle; matching it to a real person's notification is follow-up work. **Note:**
   this is cosmetic highlighting only, not Tag-for-Action (§14's actual mechanism — autocomplete,
   action button, Activity Event log, human-to-AI gate) — flagged in the v4 comparison as the wrong
-  shape to grow from; Tag-for-Action gets rebuilt separately, not extended from this.
+  shape to grow from. Tag-for-Action is now built separately (Step 5, above), not extended from
+  this; `mentions.ts` itself is untouched, still just chat-message styling.
 - `src/messaging/routes.ts` — the HTTP handlers + server-rendered HTML (channel list, message
   thread with lightweight polling for a "feels live" update without a full page reload, a comment
   thread page keyed by `?subjectType=&subjectId=`, and a recent-alerts panel).
@@ -160,9 +193,10 @@ parallel targets with no distinction. Fixed by making each surface actually matc
 
 **Not built:** real-time push (WebSocket via a Durable Object) — the message/comment views poll
 every 5s instead, which is simple, testable, and good enough for a "not urgent" internal tool; a
-natural v2 upgrade if it ever needs to feel more instant. The fixed 11-channel taxonomy (Step 4) and
-Tag-for-Action (Step 5) — see `workflows/README.md`'s Internal Team Messaging section for the full
-staged plan.
+natural v2 upgrade if it ever needs to feel more instant (the notifications/AI-actions panels added
+in Step 5 aren't included in that 5s poll either yet — same limitation, a full page load/nav shows
+them). Steps 4 and 5 are both done, per the Status line above — see `workflows/README.md`'s Internal
+Team Messaging section for the original staged plan.
 
 Pipeline visibility/reporting and system health (the rest of Piece 2, absorbing Phase 6's W6.1)
 remain not started — lower priority, no brief-v2 urgency behind them the way messaging had.

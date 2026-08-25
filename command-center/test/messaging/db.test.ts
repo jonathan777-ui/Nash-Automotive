@@ -2,16 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { FakeD1 } from './fakeD1.js';
 import {
   acknowledgeAlert,
+  createAiActionRequest,
   createChannel,
+  createNotification,
   getOrCreateThread,
   listAlertsForChannel,
   listChannels,
   listComments,
   listMessages,
+  listNotificationsFor,
+  listPendingAiActionRequests,
   listRecentAlerts,
+  markNotificationRead,
   postComment,
   postMessage,
   recordAlert,
+  resolveAiActionRequest,
 } from '../../src/messaging/db.js';
 
 describe('createChannel', () => {
@@ -188,5 +194,74 @@ describe('acknowledgeAlert', () => {
     const db = new FakeD1([], [{ success: true, meta: { changes: 0 } }]);
     const acknowledged = await acknowledgeAlert(db, 'a1', 'someone-else@orbitaiautomation.com');
     expect(acknowledged).toBe(false);
+  });
+});
+
+describe('createNotification / listNotificationsFor / markNotificationRead', () => {
+  it('creates a notification with a null linkUrl by default', async () => {
+    const db = new FakeD1();
+    const n = await createNotification(db, 'jonathan@orbitaiautomation.com', 'You were tagged on Opportunity opp-1');
+    expect(n.recipientEmail).toBe('jonathan@orbitaiautomation.com');
+    expect(n.linkUrl).toBeNull();
+    expect(n.readAt).toBeNull();
+  });
+
+  it('lists notifications scoped to the recipient', async () => {
+    const db = new FakeD1([{ results: [{ id: 'n1', recipientEmail: 'a@b.com', summary: 'x', linkUrl: null, createdAt: 't', readAt: null }] }]);
+    const list = await listNotificationsFor(db, 'a@b.com');
+    expect(list).toHaveLength(1);
+    const selectCall = db.calls.find((c) => c.sql.includes('FROM notifications'));
+    expect(selectCall?.params[0]).toBe('a@b.com');
+  });
+
+  it('marks a notification read only when scoped to the correct recipient (first-mark wins)', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 1 } }]);
+    const marked = await markNotificationRead(db, 'n1', 'a@b.com');
+    expect(marked).toBe(true);
+    const updateCall = db.calls.find((c) => c.sql.includes('UPDATE notifications'));
+    expect(updateCall?.params).toEqual([expect.any(String), 'n1', 'a@b.com']);
+  });
+
+  it('returns false when the notification was already read', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 0 } }]);
+    expect(await markNotificationRead(db, 'n1', 'a@b.com')).toBe(false);
+  });
+});
+
+describe('createAiActionRequest / listPendingAiActionRequests / resolveAiActionRequest', () => {
+  it('creates a pending request with a null opportunityId by default', async () => {
+    const db = new FakeD1();
+    const r = await createAiActionRequest(db, 'send-email', 'draft a follow-up', 'jonathan@orbitaiautomation.com');
+    expect(r.status).toBe('pending');
+    expect(r.opportunityId).toBeNull();
+    expect(r.resolvedByEmail).toBeNull();
+  });
+
+  it('lists only pending requests, oldest first', async () => {
+    const db = new FakeD1([{ results: [] }]);
+    await listPendingAiActionRequests(db);
+    const selectCall = db.calls.find((c) => c.sql.includes('FROM ai_action_requests'));
+    expect(selectCall?.sql).toContain("status = 'pending'");
+    expect(selectCall?.sql).toContain('ORDER BY created_at ASC');
+  });
+
+  it('approves a pending request and records who resolved it', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 1 } }]);
+    const resolved = await resolveAiActionRequest(db, 'r1', 'reviewer@orbitaiautomation.com', true);
+    expect(resolved).toBe(true);
+    const updateCall = db.calls.find((c) => c.sql.includes('UPDATE ai_action_requests'));
+    expect(updateCall?.params).toEqual(['approved', 'reviewer@orbitaiautomation.com', expect.any(String), 'r1']);
+  });
+
+  it('rejects a pending request', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 1 } }]);
+    await resolveAiActionRequest(db, 'r1', 'reviewer@orbitaiautomation.com', false);
+    const updateCall = db.calls.find((c) => c.sql.includes('UPDATE ai_action_requests'));
+    expect(updateCall?.params?.[0]).toBe('rejected');
+  });
+
+  it('returns false when the request was already resolved (no rows changed)', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 0 } }]);
+    expect(await resolveAiActionRequest(db, 'r1', 'reviewer@orbitaiautomation.com', true)).toBe(false);
   });
 });

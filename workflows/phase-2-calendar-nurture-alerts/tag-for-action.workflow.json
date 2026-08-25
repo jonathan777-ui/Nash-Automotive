@@ -1,0 +1,300 @@
+{
+  "name": "Orbit AI - Internal Team Messaging - Tag for Action (05 Section 14, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "e5d4a4b1-246c-44ac-ab82-bbc15f34fb51",
+      "name": "Tag for Action webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tag-for-action",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "05 Section 14: '@username (or @AI-employee) + action + company (autocomplete), OR Opportunity ID paste + @target + note. Human-to-human: personal notification + action button, logs to Activity Event. Human-to-AI: same mechanism - read-only/reversible = immediate response, external-send/billing/irreversible = same human-approval gate regardless of trigger.' Called by Command Center's handlePostTagForAction (src/messaging/routes.ts) - the compose form on /messaging is the actual UI, this workflow is where the CRM write and AI-employee gating logic live, same 'every CRM write goes through n8n' architecture as everything else in this repo. Input contract: {targetType: 'human' | 'ai', targetIdentifier: string (an email/handle, or the literal 'ai-employee'), action: string, opportunityId: string | null, note: string, taggedByEmail: string}."
+    },
+    {
+      "id": "65f1fdd8-bacb-4ea2-bf03-6c224cf20800",
+      "name": "Log Activity Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1360, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'TagForAction', opportunityId: $json.body.opportunityId, targetType: $json.body.targetType, targetIdentifier: $json.body.targetIdentifier, action: $json.body.action, note: $json.body.note, taggedByEmail: $json.body.taggedByEmail, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "'Logs to Activity Event' per spec, verbatim - the durable record, whether the target is human or AI. Same Activity Event timeline dnc-check.workflow.json's override log and W4.4's AI Activity Summary both write to. opportunityId can be null (a Tag-for-Action doesn't strictly require one, per the spec's 'OR Opportunity ID paste' framing implying it's not always present) - Twenty CRM's own handling of a null foreign key on this write is unconfirmed, same REST-shape uncertainty as everywhere else."
+    },
+    {
+      "id": "a8708fdf-104a-4e00-9874-0f384472f014",
+      "name": "Target is human?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1120, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Tag for Action webhook').item.json.body.targetType }}",
+              "rightValue": "human",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d5102d54-d675-4b2b-90ce-64ef9aba4766",
+      "name": "Notify human target",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-880, -120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/notifications",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipientEmail: $('Tag for Action webhook').item.json.body.targetIdentifier, summary: $('Tag for Action webhook').item.json.body.taggedByEmail + ' tagged you: ' + $('Tag for Action webhook').item.json.body.action + ' - ' + $('Tag for Action webhook').item.json.body.note, linkUrl: $('Tag for Action webhook').item.json.body.opportunityId ? (($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Tag for Action webhook').item.json.body.opportunityId) : null }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "'Personal notification + action button' per spec - the notification IS the delivery, the 'action button' is the linkUrl-based deep link Command Center renders (same pattern Step 3 already built for alerts). Reuses the Command Center Alerts Ingest credential (ALERTS_INGEST_SECRET) - Command Center's own routes.ts treats /api/notifications as the same trust boundary as /api/alerts, not a second secret."
+    },
+    {
+      "id": "7e7ce806-0688-402d-8f7c-d39fe18760f8",
+      "name": "Respond: tagged (human)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-640, -120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, delivered: 'notification' }) }}"
+      }
+    },
+    {
+      "id": "9f066f13-195a-4e45-8fd8-fe8a296559f4",
+      "name": "Classify AI action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-880, 120],
+      "parameters": {
+        "jsCode": "// 05 Section 10/14's automation risk boundary, applied to Tag-for-Action's human-to-AI path:\n// 'auto-execute reversible/internal, human-gate external-send/billing/irreversible' - 'Chat-invoked\n// requests are a new trigger type, not a new permission,' meaning this uses the SAME classification\n// every other AI-employee action in this repo already follows, not a separate rule invented for\n// chat. The action vocabulary itself isn't specified anywhere in the source docs - this is a\n// reasonable, conservative starting set (flagged, not silently assumed complete): anything not\n// explicitly recognized as reversible is treated as gated, erring toward the human-approval side\n// rather than accidentally auto-executing something irreversible.\nconst REVERSIBLE_ACTIONS = ['summarize', 'summarise', 'research', 'draft-note', 'draft-email', 'draft-summary'];\n\nconst action = ($('Tag for Action webhook').item.json.body.action || '').toLowerCase().trim();\nconst reversible = REVERSIBLE_ACTIONS.includes(action);\n\nreturn [{\n  json: {\n    reversible,\n    reason: reversible\n      ? `\"${action}\" is a read-only/reversible request - auto-executes immediately.`\n      : `\"${action}\" is not in the recognized reversible set - treated as external-send/billing/irreversible by default, routed to human approval.`,\n  },\n}];"
+      }
+    },
+    {
+      "id": "d4b9b274-c2c5-48d4-8dfd-d09d209066a3",
+      "name": "Reversible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-640, 120],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.reversible }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4d726dae-b1e1-4f5e-857b-9c4c41ae90f4",
+      "name": "Call Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 40],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 1024, system: [{ type: 'text', text: 'You are the AI employee for a sales team CRM. A rep tagged you with a reversible, read-only request (summarize/research/draft only - you never send anything externally from this path). Respond concisely and directly with the requested output, no preamble.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Action: ' + $('Tag for Action webhook').item.json.body.action + '\\nNote/context: ' + $('Tag for Action webhook').item.json.body.note }] }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Claude API"
+        }
+      },
+      "notes": "A real call, same credential/header pattern as post-call-synthesis.workflow.json (W3.4) - plain text response, not Structured Outputs, since a summarize/research/draft request doesn't have a fixed schema the way a call disposition does. cache_control on the static system instructions per the brief's prompt-caching-required rule."
+    },
+    {
+      "id": "820e95c4-9a22-4abb-92ee-c85b90fa0e7a",
+      "name": "Extract Claude response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 40],
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst textBlock = (body.content || []).find((b) => b.type === 'text');\nif (!textBlock) throw new Error('Claude response had no text content block.');\nreturn [{ json: { aiResponseText: textBlock.text } }];"
+      },
+      "notes": "Same unwrap-the-response-envelope pattern as post-call-synthesis.workflow.json's own extraction node - throws (routing to errorWorkflow) rather than silently passing through nothing if the text block is missing."
+    },
+    {
+      "id": "5e05bc3d-c5da-4374-a74a-0fc77ec8139d",
+      "name": "Log AI response Activity Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 40],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'AiActivityResponse', opportunityId: $('Tag for Action webhook').item.json.body.opportunityId, respondingTo: 'TagForAction', responseText: $json.aiResponseText, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The AI's own response gets logged to the same Activity Event timeline as the original tag - a rep reading the Opportunity's history sees the request AND the answer, not just one half. This is also the record 05 Section 10's 'AI Activity Summary' automation (W4.4) would read from."
+    },
+    {
+      "id": "73081877-54db-4b41-a2b2-13ce366b5140",
+      "name": "Notify tagger: AI responded",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 40],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/notifications",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipientEmail: $('Tag for Action webhook').item.json.body.taggedByEmail, summary: 'AI employee responded to your \"' + $('Tag for Action webhook').item.json.body.action + '\" request: ' + $('Extract Claude response').item.json.aiResponseText.slice(0, 200), linkUrl: $('Tag for Action webhook').item.json.body.opportunityId ? (($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Tag for Action webhook').item.json.body.opportunityId) : null }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "'Read-only/reversible = immediate response' - the rep who tagged the AI sees the answer show up as a personal notification right away, not by having to go check the Opportunity's Activity Event timeline themselves. Truncated to 200 chars in the notification summary - the full response lives in the Activity Event logged above, this is just the alert."
+    },
+    {
+      "id": "bbdcc1a4-ed3a-4405-8f1b-18969abf7641",
+      "name": "Respond: AI responded",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [560, 40],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, delivered: 'ai-response', response: $('Extract Claude response').item.json.aiResponseText }) }}"
+      }
+    },
+    {
+      "id": "69c4a90a-e56a-41bf-b5f4-63aafc51ee35",
+      "name": "Create AI action request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 220],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/ai-action-requests",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: $('Tag for Action webhook').item.json.body.action, note: $('Tag for Action webhook').item.json.body.note, requestedByEmail: $('Tag for Action webhook').item.json.body.taggedByEmail, opportunityId: $('Tag for Action webhook').item.json.body.opportunityId }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "'External-send/billing/irreversible = same human-approval gate regardless of trigger' - per spec, verbatim. Deliberately does NOT call Claude at all on this path: nothing executes until a human approves it on Command Center's /messaging page (handleResolveAiAction) - approving there is a UI action only, per this pass's scope; actually EXECUTING an approved gated action (e.g. really sending the drafted email) isn't built - that needs its own resume-after-approval mechanism this repo doesn't have yet, flagged rather than faked."
+    },
+    {
+      "id": "e049dec1-a090-4bc4-9213-02014b1b457f",
+      "name": "Respond: awaiting approval",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-160, 220],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, delivered: 'pending-approval' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Tag for Action webhook": {
+      "main": [[{ "node": "Log Activity Event", "type": "main", "index": 0 }]]
+    },
+    "Log Activity Event": {
+      "main": [[{ "node": "Target is human?", "type": "main", "index": 0 }]]
+    },
+    "Target is human?": {
+      "main": [
+        [{ "node": "Notify human target", "type": "main", "index": 0 }],
+        [{ "node": "Classify AI action", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify human target": {
+      "main": [[{ "node": "Respond: tagged (human)", "type": "main", "index": 0 }]]
+    },
+    "Classify AI action": {
+      "main": [[{ "node": "Reversible?", "type": "main", "index": 0 }]]
+    },
+    "Reversible?": {
+      "main": [
+        [{ "node": "Call Claude", "type": "main", "index": 0 }],
+        [{ "node": "Create AI action request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call Claude": {
+      "main": [[{ "node": "Extract Claude response", "type": "main", "index": 0 }]]
+    },
+    "Extract Claude response": {
+      "main": [[{ "node": "Log AI response Activity Event", "type": "main", "index": 0 }]]
+    },
+    "Log AI response Activity Event": {
+      "main": [[{ "node": "Notify tagger: AI responded", "type": "main", "index": 0 }]]
+    },
+    "Notify tagger: AI responded": {
+      "main": [[{ "node": "Respond: AI responded", "type": "main", "index": 0 }]]
+    },
+    "Create AI action request": {
+      "main": [[{ "node": "Respond: awaiting approval", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "name": "Orbit AI - Phase 4 - AI Activity Summary (W4.4, partial)",
+  "nodes": [
+    {
+      "id": "c0365027-4958-418e-b390-a834c0484de8",
+      "name": "Every day at 6pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 18 * * *" }]
+        }
+      },
+      "notes": "05 Section 10: 'AI Activity Summary, AI employee expansion (auto-execute reversible/internal, human-gate external-send/billing/irreversible)... Chat-invoked requests (Section 14) are a new trigger type, not a new permission.' The human-gate half is already built - see tag-for-action.workflow.json's Reversible?/gated split and Command Center's ai_action_requests approval queue (Step 5). This workflow is the OTHER half: a daily digest of what the AI employee actually did, so a human can see it without reading the raw Activity Event timeline record-by-record."
+    },
+    {
+      "id": "3a9e98d4-139c-47c5-87b1-49f8847d00ee",
+      "name": "Fetch recent Activity Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Fetches the whole timeline rather than a filtered/date-ranged query - Twenty CRM's REST filter support for date ranges and multi-value 'type IN (...)' isn't confirmed, same discipline as missed-follow-up-check.workflow.json's own client-side filter. Worth revisiting for a real deployment once Activity Event volume makes a full fetch impractical - not a concern yet with nothing live generating volume."
+    },
+    {
+      "id": "da23f18c-f333-48b4-8df8-a8c58e582157",
+      "name": "Filter to last 24h, AI-related",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "parameters": {
+        "jsCode": "const AI_TYPES = ['TagForAction', 'AiActivityResponse'];\nconst since = new Date(Date.now() - 24*60*60*1000);\n\nfunction asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.activityEvents)) return json.data.activityEvents;\n  if (json && Array.isArray(json.activityEvents)) return json.activityEvents;\n  return [];\n}\n\nconst events = $input.all().flatMap(asArray).filter((e) => {\n  const at = e.at || e.occurredAt;\n  return AI_TYPES.includes(e.type) && at && new Date(at) >= since;\n});\n\nreturn [{ json: { count: events.length, events } }];"
+      },
+      "notes": "TagForAction covers both human-to-AI requests AND (per its own targetType field) human-to-human tags - a real implementation would want to filter to targetType: 'ai' specifically for a genuinely AI-focused summary; kept broader here (both TagForAction and AiActivityResponse) since a human reading 'what did the AI do' likely also wants to see what got ASKED of it, not just what it answered."
+    },
+    {
+      "id": "df85610d-7a14-449e-b0dd-0b53b5bc5ed8",
+      "name": "Any activity?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-480, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "A quiet day doesn't need a digest saying 'nothing happened' - skips straight to nothing on the false branch rather than sending a content-free alert."
+    },
+    {
+      "id": "a42d6c78-9132-444e-a770-d077bd06adfc",
+      "name": "Summarize AI activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, -80],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 600, system: [{ type: 'text', text: 'You write a short daily digest of AI-employee activity for a sales team CRM, from a raw list of Activity Events. Group by type, mention counts, call out anything that looks like it needs human attention. 3-5 sentences, no preamble.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: JSON.stringify($json.events) }] }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Claude API"
+        }
+      },
+      "notes": "MODEL ROUTING (05 Section 10: 'model routing (Claude/Gemini/Grok)'): uses Claude here, same as every other real LLM call in this repo. No workflow anywhere in this repo currently has a genuine reason to route to Gemini or Grok instead - GEMINI_API_KEY/GROK_API_KEY already exist in Command Center's vendor checklist (src/vendors.ts) as named credentials, ready to wire up, but building an actual routing layer with no second real caller to route between would be speculative infrastructure with nothing to test it against. See phase-4-intelligence-layer/README.md for the routing policy this pass documents instead of code: which task types would go where, and why, once a second model-backed workflow gives that decision something real to act on."
+    },
+    {
+      "id": "277f9797-9de4-45e7-bc17-8a8a79bd751a",
+      "name": "Extract digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, -80],
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst textBlock = (body.content || []).find((b) => b.type === 'text');\nif (!textBlock) throw new Error('Claude response had no text content block.');\nreturn [{ json: { digest: textBlock.text } }];"
+      }
+    },
+    {
+      "id": "d1230b81-7907-4ba6-8ae9-07331ab0c283",
+      "name": "Post digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, -80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'ai-activity-summary', message: $json.digest }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #ai-agents (alertRouting.ts matches 'ai-activity' in the source string) - '05 Section 14: AI-to-AI coordination visibility,' and by extension the natural home for 'what did the AI do today' visibility too."
+    }
+  ],
+  "connections": {
+    "Every day at 6pm": {
+      "main": [[{ "node": "Fetch recent Activity Events", "type": "main", "index": 0 }]]
+    },
+    "Fetch recent Activity Events": {
+      "main": [[{ "node": "Filter to last 24h, AI-related", "type": "main", "index": 0 }]]
+    },
+    "Filter to last 24h, AI-related": {
+      "main": [[{ "node": "Any activity?", "type": "main", "index": 0 }]]
+    },
+    "Any activity?": {
+      "main": [
+        [{ "node": "Summarize AI activity", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Summarize AI activity": {
+      "main": [[{ "node": "Extract digest", "type": "main", "index": 0 }]]
+    },
+    "Extract digest": {
+      "main": [[{ "node": "Post digest", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -238,7 +238,7 @@ timeline, and fires W3.4 fire-and-forget for AI QA only when a transcript is act
 | W4.1 | Client health/usage scoring | Schedule or usage-event | Auto (internal scoring) | **Scaffolded** — `phase-4-intelligence-layer/health-scoring.workflow.json` |
 | W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | **Scaffolded** — `phase-4-intelligence-layer/tier-upgrade-signal.workflow.json` |
 | W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json`. **Object model migration:** moved from querying Opportunities (`stage=LiveClient`, a state Opportunities no longer reach) to querying Companies (`status=LiveClient`) — this was a real bug, not a style fix; see the CRM Architecture section below. |
-| W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | Documented only |
+| W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | **Partially scaffolded** — the human-gate mechanism is Tag-for-Action's (Command Center Step 5), the digest is `phase-4-intelligence-layer/ai-activity-summary.workflow.json` |
 | W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | Documented only |
 | W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | **Scaffolded** — `phase-4-intelligence-layer/loss-reason-capture.workflow.json` |
 | W4.7 | Opening-line conversion tracking | Deal outcome, keyed to Deep Dive's recommended opening | Auto (internal analytics) | Documented only |
@@ -251,8 +251,12 @@ protection is a hard filter in `tier-upgrade-signal.workflow.json`'s own code, n
 convention for a future workflow to remember. **W4.3's `engagementScore` dependency is resolved** —
 it now reads real data W4.1 writes daily, not nothing.
 
-W4.4 references "the existing AI Activity Summary automation," which isn't present in this Drive
-folder or this repo — worth locating before extending it. W4.5/W4.7 are each blocked on something
+**W4.4 partially built this pass** — see `phase-4-intelligence-layer/README.md`: the human-gate half
+was already Tag-for-Action's (Command Center Step 5), "chat-invoked... not a new permission" being
+exactly why; the daily AI Activity Summary digest is new. Model routing (Claude/Gemini/Grok) is
+documented as policy, not built as a router — no second real caller exists yet to route between.
+
+W4.5/W4.7 are each blocked on something
 upstream that doesn't exist yet, not on an undecided design: W4.5 needs the Front Door Audit service
 itself first (not built — see Phase 1); W4.7 needs Deep Dive Research's opening-line recommendation
 to actually be a trackable, ID'd field on the Opportunity, which depends on Deep Dive Research's own

@@ -60,8 +60,31 @@ Only auto-flags eligibility and alerts a rep (via the real `alert-dispatcher` we
 the automation risk boundary, actually asking a client for a referral is an external send and stays
 human-gated, so this workflow deliberately stops short of drafting or sending anything.
 
+## W4.4 (partial) — `ai-activity-summary.workflow.json`
+
+`05 §10`: "AI Activity Summary, AI employee expansion (auto-execute reversible/internal, human-gate
+external-send/billing/irreversible)... Chat-invoked requests (Section 14) are a new trigger type,
+not a new permission." **The human-gate half was already built as part of Command Center Step 5** —
+`tag-for-action.workflow.json`'s Reversible?/gated split and the `ai_action_requests` approval queue
+*are* that gate, generically, not something W4.4 needs its own copy of; "chat-invoked... not a new
+permission" is exactly why one mechanism serves both. What was missing: the digest itself. Built this
+pass — a daily sweep of the last 24h's AI-related Activity Events (`TagForAction`,
+`AiActivityResponse`), summarized via Claude, posted to `#ai-agents`.
+
+**Model routing (Claude/Gemini/Grok), documented as policy, not built as a router:** every real LLM
+call in this repo — including this one — uses Claude. `GEMINI_API_KEY`/`GROK_API_KEY` already exist
+in Command Center's vendor checklist (`src/vendors.ts`), ready to wire up, but no workflow anywhere
+has a genuine reason yet to route to a different model — building an actual routing layer with
+nothing real to route between would be speculative infrastructure, untestable against anything. The
+policy this pass settles on instead: **Claude stays the default for anything involving CRM data,
+compliance-sensitive judgment, or customer-facing content** (matches every real call already in this
+repo — post-call synthesis, Tag-for-Action, this digest); **Gemini/Grok are reserved for a
+genuinely cost- or latency-sensitive bulk task if one ever appears** (e.g. very-high-volume
+classification a slower/pricier model isn't worth using) — not a task type this repo has yet. Revisit
+once a second real caller exists to make routing between models a decision with something to test.
+
 ## Still documented-only
 
-W4.4 (AI employee — broad, references an automation not present in this repo), W4.5 (Front Door
-Audit refresh — depends on that service existing, not built), W4.7 (opening-line tracking — depends
-on Deep Dive Research's contract, not built). See `workflows/README.md` for the full Phase 4 catalog.
+W4.5 (Front Door Audit refresh — depends on that service existing, not built), W4.7 (opening-line
+tracking — depends on Deep Dive Research's contract, not built). See `workflows/README.md` for the
+full Phase 4 catalog.

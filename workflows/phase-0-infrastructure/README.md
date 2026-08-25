@@ -1,5 +1,30 @@
 # Phase 0 — Infrastructure Foundation
 
+Three workflows now — W0.1 plus two new ones this pass closing out `05 §11/§12`'s ops gaps
+("automated off-host backups, automation/workflow failure monitoring... backup restore testing").
+
+## Backup restore test (`backup-restore-test.workflow.json`, new — not brief-W-numbered)
+
+`05 §12`: "backup restore testing (periodic automated restore-to-scratch, not just a successful log
+entry)." Weekly (Sunday 4am, after W0.1's nightly slot): downloads the day's scraper DB dump from
+R2, restores it into a dedicated throwaway database (`orbit_scratch_restore_test` — never the real
+scraper DB), verifies real tables actually landed, drops the scratch DB either way, and alerts on
+**both outcomes** — a pass is worth surfacing too, since silence could mean "passed" or "never ran"
+and those need to stay distinguishable. Catches a failure mode W0.1's own success log can't: a
+corrupt/incomplete `pg_dump` can still upload to R2 successfully, so "the backup ran" and "the backup
+is actually restorable" are genuinely different checks.
+
+## Automation failure watchdog (`automation-failure-watchdog.workflow.json`, new — not brief-W-numbered)
+
+`05 §11`: "automation/workflow failure monitoring (meta watchdog on n8n execution failures)."
+Deliberately different from every workflow's own `settings.errorWorkflow` field, which is defense
+layer one and depends on each workflow having that field correctly configured after import. This is
+layer two: an hourly check against **n8n's own Executions API** (not Twenty CRM) for any failed
+execution in the last hour, across every workflow — catches a failure even if a specific workflow's
+`errorWorkflow` was never set or the alert-dispatcher chain itself broke, which per-workflow
+error-handling can't see. Uses `N8N_API_KEY`, already a named credential in this library's own
+credential-naming section and the Command Center vendor checklist — reused, not invented.
+
 ## W0.1 — Nightly backup (`nightly-backup.workflow.json`)
 
 Schedule Trigger (03:00 daily, instance-default timezone — confirm this is what's wanted before

@@ -1,0 +1,152 @@
+{
+  "name": "Orbit AI - Phase 0 - Backup restore test (new, not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "0da6703c-b06f-4f39-ada9-bb07b80dfc44",
+      "name": "Every Sunday at 4am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1400, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 4 * * 0" }]
+        }
+      },
+      "notes": "05 Section 12: 'backup restore testing (periodic automated restore-to-scratch, not just a successful log entry).' Weekly, after nightly-backup.workflow.json's 3am slot - a judgment call on cadence (daily would be excessive for a slow-changing check, monthly too infrequent to catch a backup that quietly started failing weeks ago), not brief-specified. Restores into a throwaway scratch database and verifies real data landed, rather than trusting 'the S3 upload succeeded' as proof the backup itself is usable - those are different failure modes (a corrupt/incomplete pg_dump can still upload successfully)."
+    },
+    {
+      "id": "f0c0c93b-6c86-4575-9946-a926153f5d9a",
+      "name": "Download latest dump from R2",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [-1160, 0],
+      "parameters": {
+        "operation": "download",
+        "bucketName": "orbit-backups",
+        "fileName": "={{ 'scraper-' + $now.format('yyyy-LL-dd') + '.sql' }}"
+      },
+      "credentials": {
+        "s3": {
+          "name": "Cloudflare R2 (S3-compatible)"
+        }
+      },
+      "notes": "Same R2 credential/endpoint caveat as nightly-backup.workflow.json's own upload nodes. ASSUMES this runs the same day a backup was created (both are scheduled - Sunday's restore test checks Sunday's own nightly backup, not an older one) - if a given night's backup ever fails to run, this download will fail too, which is itself a meaningful signal (the two workflows failing together points at nightly-backup, not this one)."
+    },
+    {
+      "id": "038bbcb4-d868-4d3e-8e2c-0ffb784fbd90",
+      "name": "Restore into scratch DB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-920, 0],
+      "parameters": {
+        "command": "=dropdb -h localhost -U PLACEHOLDER_SCRAPER_DB_USER --if-exists orbit_scratch_restore_test && createdb -h localhost -U PLACEHOLDER_SCRAPER_DB_USER orbit_scratch_restore_test && psql -h localhost -U PLACEHOLDER_SCRAPER_DB_USER -d orbit_scratch_restore_test -f /tmp/orbit-backups/{{ 'scraper-' + $now.format('yyyy-LL-dd') + '.sql' }}"
+      },
+      "notes": "Drops any leftover scratch DB from a prior failed run before recreating it, so this is safe to re-run without manual cleanup. Restores into a DEDICATED throwaway database (orbit_scratch_restore_test), never the real scraper DB - a restore test that touched production data would be a much worse failure mode than the thing it's testing for."
+    },
+    {
+      "id": "d2741e56-7814-4a10-ae0c-ef291a9a2ee0",
+      "name": "Verify restored row count",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-680, 0],
+      "parameters": {
+        "command": "=psql -h localhost -U PLACEHOLDER_SCRAPER_DB_USER -d orbit_scratch_restore_test -t -c \"SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public') AS table_count;\""
+      },
+      "notes": "Checks that real tables actually landed (a nonzero table count), not a specific expected row count - this repo doesn't know the scraper DB's real schema from this sandbox, so 'restore produced a populated database' is the honest bar to test for, not 'restore matches an exact expected shape' which would be guessing."
+    },
+    {
+      "id": "77029609-3e7a-4525-a006-f20b3d011aa0",
+      "name": "Drop scratch DB",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-440, 0],
+      "parameters": {
+        "command": "=dropdb -h localhost -U PLACEHOLDER_SCRAPER_DB_USER --if-exists orbit_scratch_restore_test"
+      },
+      "notes": "Always cleans up the scratch DB regardless of what the verify step found, so this workflow never leaves a growing pile of throwaway databases behind - runs unconditionally in the sequence, not gated behind the IF below."
+    },
+    {
+      "id": "28ec28e2-aaeb-4a2f-890f-be7b13803152",
+      "name": "Restore verified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-200, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ parseInt(($('Verify restored row count').item.json.stdout || '0').trim(), 10) }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "UNVERIFIED: assumes n8n's Execute Command node exposes stdout on `.stdout` for this version - same 'documented assumption, not exercised against a live instance' caveat as every other executeCommand node in this repo (nightly-backup.workflow.json's own)."
+    },
+    {
+      "id": "0f764d47-b60a-492d-9dc6-fc2e741ddd5c",
+      "name": "Alert: restore test passed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, -80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'backup-restore-test', message: 'Weekly backup restore test passed - scratch restore produced ' + $('Verify restored row count').item.json.stdout.trim() + ' tables.' }) }}",
+        "options": {}
+      },
+      "notes": "Alerts on SUCCESS too, not just failure - '05 Section 12: periodic automated restore-to-scratch, not just a successful log entry' is specifically about not treating an unverified backup as trustworthy; a positive result here IS the thing worth surfacing, since silence could mean 'passed' or 'never ran' and those need to be distinguishable."
+    },
+    {
+      "id": "f2985f2a-89e0-40d5-baab-338088e52eff",
+      "name": "Alert: restore test FAILED",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'critical', source: 'backup-restore-test', message: 'Weekly backup restore test FAILED - the scratch restore produced zero tables. The nightly backup may be unusable. Investigate before trusting it for a real recovery.' }) }}",
+        "options": {}
+      },
+      "notes": "Critical severity, not warning - an unusable backup discovered only during a real outage is the whole failure mode this workflow exists to catch early instead."
+    }
+  ],
+  "connections": {
+    "Every Sunday at 4am": {
+      "main": [[{ "node": "Download latest dump from R2", "type": "main", "index": 0 }]]
+    },
+    "Download latest dump from R2": {
+      "main": [[{ "node": "Restore into scratch DB", "type": "main", "index": 0 }]]
+    },
+    "Restore into scratch DB": {
+      "main": [[{ "node": "Verify restored row count", "type": "main", "index": 0 }]]
+    },
+    "Verify restored row count": {
+      "main": [[{ "node": "Drop scratch DB", "type": "main", "index": 0 }]]
+    },
+    "Drop scratch DB": {
+      "main": [[{ "node": "Restore verified?", "type": "main", "index": 0 }]]
+    },
+    "Restore verified?": {
+      "main": [
+        [{ "node": "Alert: restore test passed", "type": "main", "index": 0 }],
+        [{ "node": "Alert: restore test FAILED", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

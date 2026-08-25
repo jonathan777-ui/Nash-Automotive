@@ -1,0 +1,106 @@
+{
+  "name": "Orbit AI - Phase 0 - Automation failure watchdog (new, not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "48af89f0-9d47-4090-bb36-9833f56a258c",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }]
+        }
+      },
+      "notes": "05 Section 11: '...automation/workflow failure monitoring (meta watchdog on n8n execution failures).' Deliberately DIFFERENT from every workflow's own `settings.errorWorkflow` field - that per-workflow setting is defense LAYER ONE (a failure alerts, assuming errorWorkflow is actually configured correctly on that specific workflow after import). This is layer two: an outside check against n8n's own Executions API that catches a failure even if a workflow's errorWorkflow was never set, was misconfigured, or the alert-dispatcher chain itself broke - the exact 'meta' framing the brief uses, watching n8n's execution history rather than depending on each workflow to self-report."
+    },
+    {
+      "id": "10dce243-3440-449b-8984-79855ceb6313",
+      "name": "Fetch failed executions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/api/v1/executions?status=error&limit=50",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY || 'PLACEHOLDER_N8N_API_KEY' }}" }]
+          }
+        }
+      },
+      "notes": "n8n's own public REST API (api/v1, X-N8N-API-KEY header), NOT Twenty CRM's - this is the one workflow in this library that queries the automation platform itself rather than the CRM. N8N_API_KEY is already a named credential in this library's own 'Credential naming' section (workflows/README.md) and the Command Center vendor checklist - reused here, not invented. UNVERIFIED: the exact endpoint path/query params against a real n8n instance's public API version - built from n8n's documented API shape, not exercised live."
+    },
+    {
+      "id": "51c23fef-8e1e-4fa8-a276-7700b105fed3",
+      "name": "Summarize recent failures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && Array.isArray(json.data)) return json.data;\n  return [];\n}\n\nconst since = new Date(Date.now() - 60*60*1000);\nconst recent = $input.all().flatMap(asArray).filter((e) => {\n  const stoppedAt = e.stoppedAt || e.stopped_at;\n  return stoppedAt && new Date(stoppedAt) >= since;\n});\n\nconst byWorkflow = {};\nfor (const e of recent) {\n  const name = e.workflowData?.name || e.workflowName || e.workflowId || 'unknown workflow';\n  byWorkflow[name] = (byWorkflow[name] || 0) + 1;\n}\n\nconst summary = Object.entries(byWorkflow).map(([name, count]) => `${name} (${count})`).join(', ');\n\nreturn [{ json: { failureCount: recent.length, summary } }];"
+      }
+    },
+    {
+      "id": "2cba460a-f734-4fa9-b9b3-3004ea1c241e",
+      "name": "Any failures in the last hour?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-480, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.failureCount }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "127d04da-0dd2-4ad4-af1c-0dc993294558",
+      "name": "Alert: automation failures detected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'critical', source: 'automation-failure-watchdog', message: $json.failureCount + ' workflow execution(s) failed in the last hour: ' + $json.summary + '.' }) }}",
+        "options": {}
+      },
+      "notes": "Critical, not warning - this fires only after already confirming a real failure happened (not a prediction or a threshold guess), and a silently-broken automation is exactly the kind of thing that erodes trust in 'the system just handles it' if it goes unnoticed. Routes to #system-alerts (alertRouting.ts's fallback channel, which this source doesn't match any more specific rule for - correctly so, since this genuinely IS an infra/ops concern per 05 Section 14's own description of that channel)."
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [[{ "node": "Fetch failed executions", "type": "main", "index": 0 }]]
+    },
+    "Fetch failed executions": {
+      "main": [[{ "node": "Summarize recent failures", "type": "main", "index": 0 }]]
+    },
+    "Summarize recent failures": {
+      "main": [[{ "node": "Any failures in the last hour?", "type": "main", "index": 0 }]]
+    },
+    "Any failures in the last hour?": {
+      "main": [
+        [{ "node": "Alert: automation failures detected", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

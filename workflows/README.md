@@ -52,11 +52,18 @@ possible. Each catalog entry below states which side of that line it's on.
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
 | W0.1 | Nightly backup | Schedule (cron) | Auto (internal, reversible) | **Scaffolded** — `phase-0-infrastructure/nightly-backup.workflow.json` |
+| — | Backup restore test (new, not brief-W-numbered) | Schedule, weekly | Auto (internal, reversible) | **Scaffolded** — `phase-0-infrastructure/backup-restore-test.workflow.json` |
+| — | Automation failure watchdog (new, not brief-W-numbered) | Schedule, hourly | Auto (internal alert) | **Scaffolded** — `phase-0-infrastructure/automation-failure-watchdog.workflow.json` |
 
 **W0.1 — Nightly backup.** `pg_dump` on every Postgres DB (scraper, n8n's own DB if Postgres-backed,
 Twenty CRM if/when self-hosted) + an n8n workflow-JSON export, both pushed to the Cloudflare R2
 bucket `orbit-backups` (already live). Fails loudly (Google Chat/alert) rather than silently on any step.
-See `phase-0-infrastructure/README.md`.
+
+**Two more built this pass, closing out `05 §11/§12`'s ops gaps** — "backup restore testing
+(periodic automated restore-to-scratch, not just a successful log entry)" and "automation/workflow
+failure monitoring (meta watchdog on n8n execution failures)." Neither is a brief-numbered W-item;
+both were sitting as prose in the source docs with nothing built against them until now. See
+`phase-0-infrastructure/README.md` for the full detail.
 
 ---
 

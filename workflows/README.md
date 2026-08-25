@@ -303,10 +303,13 @@ one deliberate automated exception to that gate — see **W1.6** above, not this
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W7.1 | Twenty CRM cloud → Oracle self-host migration | Manual (one-time, post-stability) | N/A (infra migration, not a runtime automation) | Not started |
+| W7.1 | Twenty CRM cloud → Oracle self-host migration | Manual (one-time, post-stability) | N/A (infra migration, not a runtime automation) | **Documented runbook** — `phase-7-self-hosted-migration/README.md` |
 
-Explicitly sequenced *after* everything above is live and stable, per the roadmap — not a workflow
-to build now.
+Explicitly sequenced *after* everything above is live and stable, per the roadmap — the runbook says
+so itself, in its own words, right at the top. Confirmed this pass: **zero hardcoded Twenty CRM URLs
+anywhere in this repo** — every reference goes through `TWENTY_CRM_BASE_URL`/`TWENTY_CRM_API_KEY`,
+which is what makes the actual migration a credential swap in four places, not a code change, once
+someone is ready to run it.
 
 ---
 

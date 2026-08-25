@@ -243,6 +243,21 @@ channel (`05 §14`) surfaces.
   deleted, per the same "audit trail requires the history" principle as Contract's own `Superseded`
   status.
 
+### ScheduledTouch (new this pass)
+`05 §3`'s unified scheduling layer needs somewhere queryable to check "is this overdue and
+undispositioned" — Google Calendar itself has no disposition concept, so this is that state, one
+row per scheduled touch across every component the shared layer serves (Demo, Dialer, Nurture,
+Ticketing, Onboarding, CX, Contract renewal reminders).
+
+- Fields: `id`, `subjectType`, `subjectId`, `eventType` (`Demo` / `Dialer` / `Nurture` /
+  `Ticketing` / `Onboarding` / `CX` / `ContractRenewal`), `scheduledAt`, `scheduledBy`
+  (`system` / `human`), `calendarEventId` (the Google Calendar event this mirrors),
+  `disposition` (nullable — set once the touch actually happens or is explicitly skipped).
+- Assumed REST: `/rest/scheduledTouches`, `/rest/scheduledTouches/{id}`.
+- Written by `unified-scheduling.workflow.json` (W2.1) on creation; read by
+  `missed-follow-up-check.workflow.json` (hourly sweep — "any scheduled touch overdue without
+  disposition fires an alert," `05 §11`'s named `#missed-follow-ups` alert).
+
 ### Rep (Twenty CRM's native user / Workspace Member — extended, not a new object)
 Twenty CRM already has real user accounts for logged-in team members — this isn't a new custom
 object, it's that native user record with dialer-specific custom fields added on top. Needed once

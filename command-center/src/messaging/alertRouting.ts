@@ -12,7 +12,7 @@
  */
 const ROUTES: readonly { readonly match: readonly string[]; readonly channel: string }[] = [
   { match: ['lead-intake', 'deep-dive', 'front-door-audit-refresh', 'front-door-audit', 'lead-score'], channel: 'new-leads' },
-  { match: ['demo-generation'], channel: 'demos' },
+  { match: ['demo-generation', 'no-show', 'reengagement'], channel: 'demos' },
   { match: ['hopper', 'dialer', 'pacing-controller', 'attempt-recycling', 'post-call-synthesis', 'call-wrap-up'], channel: 'dialer' },
   { match: ['nurture'], channel: 'nurture' },
   { match: ['portal', 'esign', 'stripe-payment', 'location-contract-lock'], channel: 'portal-conversion' },

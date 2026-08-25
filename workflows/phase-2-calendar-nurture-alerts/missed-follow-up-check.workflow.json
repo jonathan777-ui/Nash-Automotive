@@ -1,0 +1,85 @@
+{
+  "name": "Orbit AI - Phase 2 - Missed Follow-up check (05 Section 3, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "f7a15592-324e-4d45-b1f5-6d26e18a6d39",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "notes": "05 Section 3: 'Missed Follow-up detection: one unified rule - any scheduled touch overdue without disposition fires an alert.' Hourly, not daily - a missed callback or demo matters within the hour, not the next morning. Confirm the instance's configured timezone, same caveat every scheduleTrigger in this repo carries."
+    },
+    {
+      "id": "e61d6b47-aece-41be-bd96-cee249157f6c",
+      "name": "Fetch ScheduledTouches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/scheduledTouches",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Fetches the whole table rather than a filtered query - Twenty CRM's REST filter support for 'disposition IS NULL' isn't confirmed, and this table is expected to stay small (only future/recent touches, not permanent history), so a client-side filter is the safer bet over guessing a null-check filter syntax that might silently return zero rows."
+    },
+    {
+      "id": "e9746b03-6420-4dc0-b63a-fa03ea9152a7",
+      "name": "Filter overdue, undispositioned",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.scheduledTouches)) return json.data.scheduledTouches;\n  if (json && Array.isArray(json.scheduledTouches)) return json.scheduledTouches;\n  return [];\n}\n\nconst now = new Date();\nconst overdue = $input.all().flatMap(asArray)\n  .filter((t) => !t.disposition && new Date(t.scheduledAt) < now);\n\nreturn overdue.map((t) => ({ json: t }));"
+      },
+      "notes": "Returns one item per overdue touch (not a single aggregate item) - 'any scheduled touch... fires an alert' reads as per-touch, not a batched summary, so the next Alert node fires once per row."
+    },
+    {
+      "id": "b3e83667-1827-4143-81a2-671716ab528d",
+      "name": "Alert: Missed Follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'missed-follow-up-check', message: 'Missed Follow-up: ' + $json.eventType + ' scheduled ' + $json.scheduledAt + ' for ' + $json.subjectType + ' ' + $json.subjectId + ' has no disposition.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/' + $json.subjectType + '/' + $json.subjectId }) }}",
+        "options": {}
+      },
+      "notes": "'Missed Follow-up' is its own named channel in 05 Section 14 (#missed-follow-ups) - alertRouting.ts's channelForSource already routes any source containing 'missed-follow-up' there, so this lands correctly with no extra wiring needed on the Command Center side."
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [[{ "node": "Fetch ScheduledTouches", "type": "main", "index": 0 }]]
+    },
+    "Fetch ScheduledTouches": {
+      "main": [[{ "node": "Filter overdue, undispositioned", "type": "main", "index": 0 }]]
+    },
+    "Filter overdue, undispositioned": {
+      "main": [[{ "node": "Alert: Missed Follow-up", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

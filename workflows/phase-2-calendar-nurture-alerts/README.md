@@ -65,6 +65,24 @@ workflow's `settings.errorWorkflow` field (currently `PLACEHOLDER_ALERT_WORKFLOW
 whole library) to point at it — that's a one-time manual step after import, not something fixable
 from this sandbox.
 
+## W2.1 — `unified-scheduling.workflow.json` + `missed-follow-up-check.workflow.json` + `no-show-reengagement.workflow.json`
+
+`05 §3`'s "shared advanced-logic layer used by every component" — the single place any workflow
+should go through to put something on a calendar, instead of each one talking to Google Calendar
+independently. `unified-scheduling.workflow.json` checks for overlapping events first (returns
+suggested alternate slots on conflict rather than silently double-booking or hard-blocking), tags
+the event System- vs Human-Scheduled via Google Calendar's own `extendedProperties.private`, and
+writes a new `ScheduledTouch` row (`CRM-OBJECT-MODEL.md`) so there's calendar-agnostic state to check
+disposition against. `missed-follow-up-check.workflow.json` (hourly) is that check — "any scheduled
+touch overdue without disposition fires an alert," the named `#missed-follow-ups` trigger.
+`no-show-reengagement.workflow.json` drafts (via a real Claude call, never auto-sends) a rebooking
+message once a Demo touch is marked `NoShow`. **Flagged, not silently assumed:** the Google Calendar
+call uses a raw REST shape (this library's usual one-HTTP-node-type convention) rather than n8n's
+dedicated Google Calendar node/credential type — reconsider once this actually gets imported, since
+the dedicated node's guided OAuth setup may just be less work. `GOOGLE_CALENDAR_ID` is a new
+credential gap, same treatment as `SMS_PROVIDER_URL` — not yet in the Command Center vendor
+checklist.
+
 ## `tag-for-action.workflow.json` (new, not brief-W-numbered — Command Center Step 5)
 
 `05 §14`'s Tag-for-Action mechanism, the n8n side: logs a `TagForAction` Activity Event on Twenty

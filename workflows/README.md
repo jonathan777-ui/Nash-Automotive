@@ -102,7 +102,7 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W2.1 | Unified calendar write-through | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | Documented only |
+| W2.1 | Unified calendar write-through + Missed Follow-up + no-show re-engagement | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | **Scaffolded** — `phase-2-calendar-nurture-alerts/unified-scheduling.workflow.json` + `missed-follow-up-check.workflow.json` + `no-show-reengagement.workflow.json` |
 | W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | Documented only |
 | W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Stage = Live Client + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | Documented only |
 | W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat + Command Center in-app (both real) + SMS on critical (still a placeholder — no provider in `02 - Launch Checklist`) — see that folder's README. |
@@ -110,10 +110,20 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
 | W2.7 | Compliant hours + off-hours consent gate (new, not in the brief's own numbering) | Permission check at the dialer action layer, alongside W2.6 | **Hard gate** — blocks outside TCPA-floor calling hours unless a system-checked + human-verified ConsentRecord is on file | **Scaffolded** — `phase-2-calendar-nurture-alerts/compliant-hours-consent-gate.workflow.json` |
 
-Not scaffolded yet: W2.1 needs the calendar's actual event schema and the System-Scheduled vs.
-Human-Scheduled tagging convention decided against a real Google Calendar setup; W2.2/W2.3 need the
-nurture/CX message *content* decided (the brief resolves the CX cadence's timing — 7/30/60/90-day
-then quarterly — but not what each touch says).
+**W2.1 built this pass**, once the full `05 §3` spec was re-confirmed against source: conflict
+detection (checks Google Calendar for overlapping events, returns suggested alternate slots rather
+than blocking outright), System/Human-Scheduled tagging (Google Calendar's `extendedProperties.private`,
+invisible in the UI, readable by anything that needs to know), and a new `ScheduledTouch` object
+(`CRM-OBJECT-MODEL.md`) giving the calendar-agnostic "is this overdue and undispositioned" state
+`missed-follow-up-check.workflow.json` (new, hourly) sweeps for — `05 §11`'s named `#missed-follow-ups`
+alert trigger. `no-show-reengagement.workflow.json` (new) drafts (never sends — automation risk
+boundary) a rebooking outreach message via a real Claude call once a Demo touch is marked `NoShow`.
+None of the three are called from anywhere in this repo yet — they're real, callable logic waiting
+on their callers (a Deals Desk-style UI to disposition touches, and every other workflow that should
+be scheduling through this layer instead of nothing at all today).
+
+W2.2/W2.3 still need the nurture/CX message *content* decided (the brief resolves the CX cadence's
+timing — 7/30/60/90-day then quarterly — but not what each touch says).
 
 **W2.4 — scaffolded in an earlier pass, alert-surface priority fixed this pass (Step 3).** The
 dispatch mechanism itself (receive an alert, route to Google Chat and/or SMS by severity) didn't need

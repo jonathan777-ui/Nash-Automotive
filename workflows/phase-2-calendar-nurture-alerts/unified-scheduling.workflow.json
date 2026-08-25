@@ -1,0 +1,167 @@
+{
+  "name": "Orbit AI - Phase 2 - Unified scheduling layer (W2.1)",
+  "nodes": [
+    {
+      "id": "f533585d-28c0-42cd-85cd-091d828264a2",
+      "name": "Schedule event webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "unified-scheduling",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "05 Section 3: 'Google Calendar backing store + shared advanced-logic layer used by every component (Demo, Dialer, Nurture, Ticketing, Onboarding, CX, Contract renewal reminders). Conflict detection, availability rules, auto-suggested slots, System/Human-Scheduled tagging.' This is that shared layer - every other workflow that needs to put something on a calendar (demo bookings, callback times, CX touches, renewal reminders) calls THIS webhook rather than hitting Google Calendar directly, same 'one place to change delivery logic' reasoning as alert-dispatcher.workflow.json. Input contract: {subjectType, subjectId, eventType: 'Demo'|'Dialer'|'Nurture'|'Ticketing'|'Onboarding'|'CX'|'ContractRenewal', scheduledAt, durationMinutes, scheduledBy: 'system'|'human', scheduledByRepId?, title, note}. Not yet called from any other workflow in this repo - built as real, callable logic waiting on its callers (same status contract-amendment-flow.workflow.json is in)."
+    },
+    {
+      "id": "a48d8187-db7d-4e5c-85fb-588753497fb9",
+      "name": "Check calendar conflicts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + ($env.GOOGLE_CALENDAR_ID || 'primary') + '/events?timeMin=' + encodeURIComponent($json.body.scheduledAt) + '&timeMax=' + encodeURIComponent(new Date(new Date($json.body.scheduledAt).getTime() + $json.body.durationMinutes*60000).toISOString()) + '&singleEvents=true' }}",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Google Calendar API"
+        }
+      },
+      "notes": "GENUINELY UNCERTAIN, flagged more prominently than most credential guesses in this repo: n8n's Google Calendar integration normally uses its own dedicated 'Google Calendar OAuth2 API' credential type and a specialized node (n8n-nodes-base.googleCalendar), not a generic httpRequest call - this workflow uses the raw Calendar API v3 REST shape instead, matching this library's 'one HTTP node type throughout' convention (same choice already made for every other external call here), but that means it needs a plain OAuth2 credential wired manually rather than n8n's built-in Google Calendar node's guided setup. Reasonable, but worth reconsidering once this is actually imported - the dedicated node may simply be less work. GOOGLE_CALENDAR_ID isn't in the Command Center vendor checklist yet (src/vendors.ts) - a real gap, same treatment as SMS_PROVIDER_URL."
+    },
+    {
+      "id": "6a59926f-6880-40d9-a260-d07741a21a00",
+      "name": "Evaluate conflicts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-920, 0],
+      "parameters": {
+        "jsCode": "const body = $('Schedule event webhook').item.json.body;\nconst calResponse = $input.first().json;\nconst events = calResponse.items || calResponse.data?.items || [];\n\nif (events.length === 0) {\n  return [{ json: { conflict: false } }];\n}\n\n// Auto-suggested slots: naive half-hour-increment search starting right after the requested slot,\n// up to 6 tries (3 hours out) - a real 'availability rules' engine (working hours, per-rep\n// calendars, buffer time) isn't specified anywhere in the source docs, so this is a deliberately\n// simple placeholder algorithm, flagged as such rather than presented as the real thing.\nconst durationMs = body.durationMinutes * 60000;\nconst suggestions = [];\nlet candidate = new Date(new Date(body.scheduledAt).getTime() + durationMs);\nfor (let i = 0; i < 6 && suggestions.length < 3; i++) {\n  suggestions.push(candidate.toISOString());\n  candidate = new Date(candidate.getTime() + 30 * 60000);\n}\n\nreturn [{\n  json: {\n    conflict: true,\n    conflictingEventCount: events.length,\n    suggestedSlots: suggestions,\n  },\n}];"
+      }
+    },
+    {
+      "id": "d79756c7-4975-4d2e-ba63-3c31f74d738f",
+      "name": "Conflict?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-680, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.conflict }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9b985c1c-c5db-495e-b662-30563582c088",
+      "name": "Respond: conflict",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-440, -100],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 409,
+        "responseBody": "={{ JSON.stringify({ ok: false, conflict: true, suggestedSlots: $json.suggestedSlots }) }}"
+      },
+      "notes": "Doesn't auto-pick an alternate slot - returns the suggestions and lets the caller (or the human behind it) choose, since auto-booking into a merely-suggested slot without confirmation isn't 'conflict detection,' it's a second guess layered on the first."
+    },
+    {
+      "id": "aee798b7-260a-41c5-8ce8-b16f6615bd0c",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + ($env.GOOGLE_CALENDAR_ID || 'primary') + '/events' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ summary: $('Schedule event webhook').item.json.body.title, description: $('Schedule event webhook').item.json.body.note, start: { dateTime: $('Schedule event webhook').item.json.body.scheduledAt }, end: { dateTime: new Date(new Date($('Schedule event webhook').item.json.body.scheduledAt).getTime() + $('Schedule event webhook').item.json.body.durationMinutes*60000).toISOString() }, extendedProperties: { private: { scheduledBy: $('Schedule event webhook').item.json.body.scheduledBy, scheduledByRepId: $('Schedule event webhook').item.json.body.scheduledByRepId || '', subjectType: $('Schedule event webhook').item.json.body.subjectType, subjectId: $('Schedule event webhook').item.json.body.subjectId, eventType: $('Schedule event webhook').item.json.body.eventType } } }) }}",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Google Calendar API"
+        }
+      },
+      "notes": "'System/Human-Scheduled tagging' per spec - stored in extendedProperties.private (Google Calendar's own mechanism for app-specific metadata that doesn't show in the UI), not the visible title/description, so a human looking at their calendar sees a normal event while this workflow (and anything reading events back) can still tell which ones were system-generated."
+    },
+    {
+      "id": "134a189a-2cf3-4d2b-83d8-3ecda92dd1a7",
+      "name": "Create ScheduledTouch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/scheduledTouches",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ subjectType: $('Schedule event webhook').item.json.body.subjectType, subjectId: $('Schedule event webhook').item.json.body.subjectId, eventType: $('Schedule event webhook').item.json.body.eventType, scheduledAt: $('Schedule event webhook').item.json.body.scheduledAt, scheduledBy: $('Schedule event webhook').item.json.body.scheduledBy, calendarEventId: $json.id, disposition: null }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New object this pass, CRM-OBJECT-MODEL.md's ScheduledTouch - the record missed-follow-up-check.workflow.json sweeps for 'any scheduled touch overdue without disposition.' Google Calendar itself has no concept of 'disposition' (did this actually happen, was it a no-show), so that state has to live somewhere queryable in the CRM, not just on the calendar event."
+    },
+    {
+      "id": "527de723-de7e-4396-81cf-bc765357b3c7",
+      "name": "Respond: scheduled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [40, 100],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, calendarEventId: $('Create Calendar Event').item.json.id, scheduledTouchId: $json.id }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule event webhook": {
+      "main": [[{ "node": "Check calendar conflicts", "type": "main", "index": 0 }]]
+    },
+    "Check calendar conflicts": {
+      "main": [[{ "node": "Evaluate conflicts", "type": "main", "index": 0 }]]
+    },
+    "Evaluate conflicts": {
+      "main": [[{ "node": "Conflict?", "type": "main", "index": 0 }]]
+    },
+    "Conflict?": {
+      "main": [
+        [{ "node": "Respond: conflict", "type": "main", "index": 0 }],
+        [{ "node": "Create Calendar Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [[{ "node": "Create ScheduledTouch", "type": "main", "index": 0 }]]
+    },
+    "Create ScheduledTouch": {
+      "main": [[{ "node": "Respond: scheduled", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -6,6 +6,8 @@ describe('channelForSource', () => {
     ['lead-intake-to-demo-dashboard', 'new-leads'],
     ['front-door-audit-refresh', 'new-leads'],
     ['demo-generation-trigger', 'demos'],
+    ['no-show-reengagement', 'demos'],
+    ['missed-follow-up-check', 'missed-follow-ups'],
     ['hopper-request-next', 'dialer'],
     ['pacing-controller', 'dialer'],
     ['post-call-synthesis', 'dialer'],

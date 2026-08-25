@@ -1,0 +1,127 @@
+{
+  "name": "Orbit AI - Phase 2 - No-show re-engagement (05 Section 3, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "efce5eec-5a7d-4dd8-858b-a7be04e8e3b2",
+      "name": "No-show webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1160, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "no-show-reengagement",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "05 Section 3: 'No-show re-engagement: auto-fires rebooking outreach draft.' Meant to be called the moment a Demo's ScheduledTouch (unified-scheduling.workflow.json) is dispositioned 'NoShow' - nothing in this repo currently dispositions a ScheduledTouch (that's a Deals Desk UI action, not built - see the tracked Deals Desk task), so this is real, callable logic waiting on that caller, same status as several other workflows built this pass. Input contract: {opportunityId, companyName, contactName}."
+    },
+    {
+      "id": "1bd934c5-f4da-49ad-a30a-1134009ceeaf",
+      "name": "Draft rebooking outreach",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 512, system: [{ type: 'text', text: 'You draft short, friendly rebooking outreach messages for a sales team after a prospect no-shows a demo. One or two sentences, no guilt-tripping, a clear next step (reply with times that work). This is a DRAFT for a human rep to review and send - never implies it has already been sent.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Company: ' + $json.body.companyName + '\\nContact: ' + ($json.body.contactName || 'unknown') + '\\nThey no-showed a scheduled demo. Draft a rebooking message.' }] }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Claude API"
+        }
+      },
+      "notes": "Drafts only, never sends - per the automation risk boundary, an outbound message to a lead is an external send and stays human-gated (same rule W2.2/W2.3's nurture/CX cadence already follow). Same Claude credential/header pattern as every other real Claude call in this repo."
+    },
+    {
+      "id": "ab9edca4-0927-43e8-b419-321a52ec255d",
+      "name": "Extract draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 0],
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst textBlock = (body.content || []).find((b) => b.type === 'text');\nif (!textBlock) throw new Error('Claude response had no text content block.');\nreturn [{ json: { draftText: textBlock.text } }];"
+      }
+    },
+    {
+      "id": "c9ddfc54-df0a-4a4a-b035-5b723cebfbb2",
+      "name": "Log draft to Activity Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'RebookingDraft', opportunityId: $('No-show webhook').item.json.body.opportunityId, draftText: $json.draftText, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same Activity Event timeline every other draft/log write in this repo uses - a rep opening the Opportunity sees the draft sitting there, ready to copy/send or edit, not buried in an email inbox somewhere."
+    },
+    {
+      "id": "0b3b0aca-4aa0-4777-b5d4-dd11a6063963",
+      "name": "Alert: rebooking draft ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'no-show-reengagement', message: 'No-show rebooking draft ready for ' + $('No-show webhook').item.json.body.companyName + '.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('No-show webhook').item.json.body.opportunityId }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #demos (alertRouting.ts's channelForSource matches 'no-show'/'reengagement' in the source string) - a rep watching that channel sees the draft is ready without needing to poll the Opportunity themselves."
+    },
+    {
+      "id": "05a307a8-67ea-418e-a69f-00e4974dbc01",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [40, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, draftText: $('Extract draft').item.json.draftText }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "No-show webhook": {
+      "main": [[{ "node": "Draft rebooking outreach", "type": "main", "index": 0 }]]
+    },
+    "Draft rebooking outreach": {
+      "main": [[{ "node": "Extract draft", "type": "main", "index": 0 }]]
+    },
+    "Extract draft": {
+      "main": [[{ "node": "Log draft to Activity Event", "type": "main", "index": 0 }]]
+    },
+    "Log draft to Activity Event": {
+      "main": [[{ "node": "Alert: rebooking draft ready", "type": "main", "index": 0 }]]
+    },
+    "Alert: rebooking draft ready": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

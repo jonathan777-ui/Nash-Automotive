@@ -367,6 +367,22 @@
       "notes": "Routes to #portal-conversion (alertRouting.ts substring-matches 'stripe-payment' in the source string, and 'stripe-payment-dunning' contains it). severity:'warning', not 'critical' - a single failed payment isn't yet an emergency, a human just needs to see it and decide whether to follow up or retry the charge manually in Stripe. Recomputes the attempt count from 'Fetch Opportunity (dunning)' the same way 'Write dunning state' did, rather than trusting the PATCH response to echo the updated record back - that shape isn't verified for this Twenty CRM assumption, so this node doesn't depend on it."
     },
     {
+      "id": "b7c8d9ea-fb01-4234-a345-6f7a8b9c0d1f",
+      "name": "Trigger onboarding provisioning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 60],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/onboarding-provisioning",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companyId: $('Create Company').item.json.id, opportunityId: $('Verify signature & classify event').item.json.opportunityId, companyName: ($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).companyName }) }}",
+        "options": {}
+      },
+      "notes": "Phase 6/W6.3, new this pass - fire-and-forget, same pattern as the opening-line-tracking branch right below. onboarding-provisioning.workflow.json creates the per-client Drive folder and a documents-access PIN, closing the gap W1.7 (Documents/Files) was blocked on."
+    },
+    {
       "id": "753bb0b4-3a29-49e8-80eb-c862d24197ca",
       "name": "Respond: handled",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -481,7 +497,8 @@
       "main": [
         [
           { "node": "Respond: handled", "type": "main", "index": 0 },
-          { "node": "Track opening-line outcome", "type": "main", "index": 0 }
+          { "node": "Track opening-line outcome", "type": "main", "index": 0 },
+          { "node": "Trigger onboarding provisioning", "type": "main", "index": 0 }
         ]
       ]
     }

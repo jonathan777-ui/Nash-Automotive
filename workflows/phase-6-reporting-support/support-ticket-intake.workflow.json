@@ -1,0 +1,125 @@
+{
+  "name": "Orbit AI - Phase 6 - Support ticketing intake (W6.2)",
+  "nodes": [
+    {
+      "id": "30000000-0000-4000-8000-000000000001",
+      "name": "Support ticket webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-ticket-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "W6.2: 'Support ticketing intake... Auto to intake/route; human resolves (per humans stay on... support).' Called by portal/netlify/functions/submit-support-ticket.mts (portal/public/support.html's form). Input: {opportunityId (nullable), contactName (nullable), contactEmail, subject, message}. Server-side-validated a second time here even though the Netlify function already checks - same 'belt and suspenders, don't trust a client-side-only check' reasoning as portal-esign-submitted.workflow.json."
+    },
+    {
+      "id": "30000000-0000-4000-8000-000000000002",
+      "name": "Validate submission",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.body.contactEmail }}", "rightValue": "", "operator": { "type": "string", "operation": "notEquals" } },
+            { "id": "c2", "leftValue": "={{ $json.body.subject }}", "rightValue": "", "operator": { "type": "string", "operation": "notEquals" } },
+            { "id": "c3", "leftValue": "={{ $json.body.message }}", "rightValue": "", "operator": { "type": "string", "operation": "notEquals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "30000000-0000-4000-8000-000000000003",
+      "name": "Respond: invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-920, 140],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: 'contactEmail, subject, and message are all required.' }) }}"
+      }
+    },
+    {
+      "id": "30000000-0000-4000-8000-000000000004",
+      "name": "Create SupportTicket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/supportTickets",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $json.body.opportunityId || null, contactName: $json.body.contactName || null, contactEmail: $json.body.contactEmail, subject: $json.body.subject, message: $json.body.message, status: 'Open', createdAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New object this pass, CRM-OBJECT-MODEL.md's SupportTicket - status starts 'Open', a human works it from there (this workflow does nothing else to it; there's no auto-resolution path anywhere in this repo, matching 'humans stay on... support' verbatim)."
+    },
+    {
+      "id": "30000000-0000-4000-8000-000000000005",
+      "name": "Alert: support ticket opened",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, -180],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'support-ticket', message: 'New support ticket from ' + $('Support ticket webhook').item.json.body.contactEmail + ': ' + $('Support ticket webhook').item.json.body.subject, linkUrl: $('Support ticket webhook').item.json.body.opportunityId ? (($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Support ticket webhook').item.json.body.opportunityId) : null }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #cx-retention - alertRouting.ts's cx-retention route extended this pass to match 'support-ticket' alongside 'referral-trigger'/'health-scoring'/'tier-upgrade'/'churn'/'cx-'. severity:'warning', not 'info' - an open, unrouted client support need is worth surfacing more prominently than a routine automated draft, since a human hasn't seen it yet at all."
+    },
+    {
+      "id": "30000000-0000-4000-8000-000000000006",
+      "name": "Respond: created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-440, -100],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, ticketId: ($('Create SupportTicket').item.json.data || $('Create SupportTicket').item.json).id }) }}"
+      },
+      "notes": "portal/netlify/functions/lib/submitSupportTicket.ts requires ticketId in this response and fails cleanly if it is missing - handles both the {data:{...}} and bare-object Twenty CRM response shapes, same uncertainty as everywhere else in this repo."
+    }
+  ],
+  "connections": {
+    "Support ticket webhook": {
+      "main": [[{ "node": "Validate submission", "type": "main", "index": 0 }]]
+    },
+    "Validate submission": {
+      "main": [
+        [{ "node": "Create SupportTicket", "type": "main", "index": 0 }],
+        [{ "node": "Respond: invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create SupportTicket": {
+      "main": [
+        [
+          { "node": "Alert: support ticket opened", "type": "main", "index": 0 },
+          { "node": "Respond: created", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

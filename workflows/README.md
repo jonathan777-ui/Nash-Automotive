@@ -77,7 +77,7 @@ both were sitting as prose in the source docs with nothing built against them un
 | W1.4 | Portal e-sign submitted → CRM advance | Webhook (portal's own lightweight inline e-sign capture) | Auto (internal stage advance) | **Scaffolded, both sides** — `portal/public/proposal.html` + `portal/netlify/functions/submit-esign.mts` (the real capture UI and its backend) posting to `phase-1-mvp/portal-esign-submitted.workflow.json` (the n8n side). |
 | W1.5 | Onboarding Form submitted → CRM update | Webhook (portal form) | Auto (internal) | **Partially built** — `portal/public/onboarding.html` exists, but its detail fields (hours, contact email) are structural placeholders that don't submit anywhere yet; the brief doesn't specify the Onboarding Form's real field schema. The page's Stripe payment step (W1.6) is fully functional. |
 | W1.6 | Stripe payment → create Company/Contract/BillingPeriod → Locations Active → Opportunity Won | Webhook (Stripe) | Auto — the brief's own explicit resolution of the billing-stage tension (see below) | **Scaffolded, both sides** — `portal/netlify/functions/create-checkout-session.mts` (creates the real Checkout Session, tier prices from the brief) + `phase-1-mvp/stripe-payment-to-crm.workflow.json` (the webhook/CRM-advance side), both against placeholder Stripe credentials until real ones land. **v2 change:** pulled forward from Phase 5 into Phase 1. **Object model migration (this pass):** this is now where the Opportunity hands off to Company/Contract — creates the Company, creates a Contract mirroring the Opportunity's Locations, sets each Location's `contractStatus`, creates the first Billing/Accounting Period, and renames the Opportunity's terminal stage from an invented "Live Client" to the brief's own "Won." New-logo path only — Contract Amendment (existing Company) is explicitly not built this pass. |
-| W1.7 | Documents/Files access (PIN-gated, post-payment Drive folder repurposing) | Client action on the portal | Auto (internal, with an access audit log per §13) | Documented only |
+| W1.7 | Documents/Files access (PIN-gated, post-payment Drive folder repurposing) | Client action on the portal | Auto (internal, with an access audit log per §13) | **Scaffolded, both sides** — `portal/public/documents.html` + `portal/netlify/functions/verify-documents-pin.mts` (PIN check + audit log) on the portal side; `phase-6-reporting-support/onboarding-provisioning.workflow.json` (W6.3) on the CRM side, creating the Drive folder and PIN this was blocked on |
 
 Portal step order per the brief: Proposal (W1.3) → e-sign (W1.4) → Onboarding Form (W1.5) → Stripe
 payment (W1.6). Full detail, node-by-node, for W1.1/W1.2/W1.4/W1.6: `phase-1-mvp/README.md`.
@@ -295,9 +295,9 @@ one deliberate automated exception to that gate — see **W1.6** above, not this
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W6.1 | Pipeline reporting/dashboard | Schedule / on-demand | Auto (internal reporting) | Not started |
-| W6.2 | Support ticketing intake | Webhook (client-facing form/email) | Auto to intake/route; human resolves (per "humans stay on... support") | Not started |
-| W6.3 | Onboarding provisioning automation | Post-payment event | Auto (internal, reversible provisioning) | Not started |
+| W6.1 | Pipeline reporting/dashboard | Schedule / on-demand | Auto (internal reporting) | **Scaffolded** — `phase-6-reporting-support/pipeline-reporting-digest.workflow.json`, weekly, routes to `#accounting` |
+| W6.2 | Support ticketing intake | Webhook (client-facing form/email) | Auto to intake/route; human resolves (per "humans stay on... support") | **Scaffolded, both sides** — `portal/public/support.html` + `portal/netlify/functions/submit-support-ticket.mts` + `phase-6-reporting-support/support-ticket-intake.workflow.json`, new `SupportTicket` object |
+| W6.3 | Onboarding provisioning automation | Post-payment event | Auto (internal, reversible provisioning) | **Scaffolded** — `phase-6-reporting-support/onboarding-provisioning.workflow.json`, fire-and-forget off W1.6's Won path. Also unblocks W1.7 above |
 
 ## Phase 7 — Self-Hosted Twenty CRM Migration
 
@@ -391,8 +391,10 @@ and enough for a "not urgent" internal tool; noted as a natural v2 upgrade, not 
 `command-center/DEPLOY.md` step 11 for how to verify each. Tag-for-Action's n8n side is
 `phase-2-calendar-nurture-alerts/tag-for-action.workflow.json` (new, not brief-W-numbered).
 
-Pipeline visibility/reporting (the rest of Piece 2, absorbing W6.1) remains not started — no
-brief-v2 urgency behind it the way messaging had.
+Pipeline visibility/reporting (the rest of Piece 2, absorbing W6.1) is now built as a scheduled
+digest (see Phase 6 below) rather than a live Command Center page — no brief-v2 urgency behind a
+real dashboard UI the way messaging had, so a weekly narrative posted to `#accounting` was the
+lighter-weight way to close the gap.
 
 ---
 
@@ -416,6 +418,15 @@ entry in `command-center/src/vendors.ts` (a Google Chat webhook URL isn't really
 *credential* the way an API key is — same treatment as `N8N_INSTANCE_URL`). SMS remains the bigger
 open item: no provider appears anywhere in `02 - Launch Checklist` at all, not even as a deferred
 item. Worth resolving before that workflow matters for real; see that folder's README.
+
+**A third, found while building Phase 6's onboarding provisioning:** `onboarding-provisioning.workflow.json`
+needs a `Google Drive OAuth2` n8n credential to create per-client Drive folders — distinct from the
+`google-cloud` row `command-center/src/vendors.ts` already has (that row covers `gcloud auth
+application-default login`/Application Default Credentials for the Places API and Drive API's own
+scopes at the account level, not an OAuth2 client n8n's HTTP node can authenticate a REST call with).
+A real Drive-scoped OAuth2 client needs to be created separately in Google Cloud Console and added to
+n8n directly — `command-center/src/vendors.ts` doesn't collect it. `GOOGLE_DRIVE_CLIENTS_PARENT_FOLDER_ID`
+is a second new env var that workflow needs, also with no Secrets Store entry.
 
 ## How this library relates to the rest of the repo
 

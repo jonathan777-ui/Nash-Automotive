@@ -223,6 +223,12 @@ Opportunity — see the load-bearing distinction above.
   own output, a judgment-call formula since `05 §9` names "health/usage scoring" as a heading with
   no formula given; see that workflow's own notes for exactly what it's built from and why it
   deliberately avoids faking a usage/telemetry signal this repo has no real pipeline for),
+  `driveFolderId`/`driveFolderUrl` (new this pass, Phase 6/W6.3 — the per-client Drive folder
+  `onboarding-provisioning.workflow.json` creates right after Stripe payment succeeds, closing the
+  gap W1.7's own notes named: "the same per-client Drive folder created earlier in the funnel gets
+  repurposed post-payment" — nothing previously created it), `documentsAccessPinHash` (new this pass
+  — a SHA-256 hash, never the plaintext PIN; `portal/netlify/functions/lib/verifyDocumentsPin.ts`
+  compares against it, W1.7's "PIN-gated via Netlify Function"),
   `churnWinbackSentAt`/`churnWinbackAttemptCount`/`churnWinbackDraftText` (new this pass —
   `churn-winback.workflow.json`'s own state, `06`'s audit-gap list: "churn/win-back." Keyed off
   `engagementScore` dropping below a judgment-call threshold rather than a calendar cadence like
@@ -408,6 +414,19 @@ now the only value is an off-hours call request, but the shape generalizes.
   not sufficient — `verifiedByRepId`/`verifiedAt` must also be set before
   `compliant-hours-consent-gate.workflow.json` allows an off-hours call. See the Compliance
   layer section above.
+
+### SupportTicket (new this pass)
+`06`'s Phase 6 catalog, W6.2: "Support ticketing intake... Auto to intake/route; human resolves (per
+'humans stay on... support')." Its own object rather than an Activity Event, since a ticket has a
+lifecycle (`Open` → resolved) an append-only event log doesn't naturally represent.
+
+- Fields: `id`, `opportunityId` (nullable — a prospect or someone without an active deal can still
+  submit one), `contactName` (nullable), `contactEmail`, `subject`, `message`, `status` (`Open` only
+  value written by anything in this repo — resolution is a manual CRM edit, no workflow here ever
+  auto-resolves one, matching "humans stay on... support" literally), `createdAt`.
+- Assumed REST: `/rest/supportTickets`, `/rest/supportTickets/{id}`.
+- Written by `support-ticket-intake.workflow.json`, fed by `portal/public/support.html` via
+  `portal/netlify/functions/submit-support-ticket.mts`.
 
 ## What anchors where — the actual per-workflow decisions this pass made
 

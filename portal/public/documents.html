@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your Documents — Orbit AI</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <span class="name">Orbit AI</span>
+    <span id="company-name" class="subtitle"></span>
+  </header>
+
+  <div class="disclaimer">
+    <strong>W1.7 (05 §7/§13):</strong> PIN-gated access to your per-client Drive folder, repurposed
+    post-payment from the one created during your onboarding. Every access attempt (correct or not)
+    is logged.
+  </div>
+
+  <h1>Your Documents</h1>
+  <p class="subtitle">Enter the PIN a rep gave you to open your shared files folder.</p>
+
+  <div id="content">
+    <div class="card">
+      <label for="pin">Access PIN</label>
+      <input type="text" id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6-digit PIN" />
+      <button class="primary" id="verifyBtn" style="margin-top:12px">Unlock</button>
+      <div id="verifyMsg" class="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/portal.js"></script>
+<script>
+async function main() {
+  const opportunityId = getOpportunityId();
+  const msgEl = document.getElementById('verifyMsg');
+
+  if (!opportunityId) {
+    msgEl.textContent = 'No ?id= in the URL - this page needs a link from the CRM.';
+    msgEl.className = 'msg error';
+    document.getElementById('verifyBtn').disabled = true;
+    return;
+  }
+
+  document.getElementById('verifyBtn').addEventListener('click', async () => {
+    const pin = document.getElementById('pin').value.trim();
+    if (!pin) {
+      msgEl.textContent = 'Enter your PIN first.';
+      msgEl.className = 'msg error';
+      return;
+    }
+
+    const btn = document.getElementById('verifyBtn');
+    btn.disabled = true;
+    msgEl.textContent = 'Checking…';
+    msgEl.className = 'msg';
+
+    try {
+      const res = await fetch('/api/verify-documents-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunityId, pin }),
+      });
+      const body = await res.json();
+      if (!body.ok) throw new Error(body.reason || 'Could not verify PIN.');
+
+      msgEl.textContent = 'Unlocked - opening your folder in a new tab…';
+      msgEl.className = 'msg success';
+      window.open(body.driveFolderUrl, '_blank', 'noopener');
+    } catch (err) {
+      msgEl.textContent = err.message;
+      msgEl.className = 'msg error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+main();
+</script>
+</body>
+</html>

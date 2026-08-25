@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support — Orbit AI</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <span class="name">Orbit AI</span>
+    <span class="subtitle">Support</span>
+  </header>
+
+  <div class="disclaimer">
+    <strong>W6.2:</strong> submitting here creates a ticket a human resolves — "humans stay on...
+    support" per the brief. Nothing here is answered automatically.
+  </div>
+
+  <h1>Need help?</h1>
+  <p class="subtitle">Tell us what's going on and we'll get back to you.</p>
+
+  <div class="card">
+    <label for="contactName">Your name</label>
+    <input type="text" id="contactName" placeholder="Jane Smith" />
+    <label for="contactEmail">Your email</label>
+    <input type="email" id="contactEmail" placeholder="jane@example.com" required />
+    <label for="subject">Subject</label>
+    <input type="text" id="subject" placeholder="What's this about?" required />
+    <label for="message">Message</label>
+    <textarea id="message" rows="6" placeholder="Describe the issue…" required></textarea>
+    <button class="primary" id="submitBtn" style="margin-top:12px">Submit</button>
+    <div id="submitMsg" class="msg"></div>
+  </div>
+</div>
+
+<script src="/portal.js"></script>
+<script>
+document.getElementById('submitBtn').addEventListener('click', async () => {
+  const msgEl = document.getElementById('submitMsg');
+  const contactName = document.getElementById('contactName').value.trim();
+  const contactEmail = document.getElementById('contactEmail').value.trim();
+  const subject = document.getElementById('subject').value.trim();
+  const message = document.getElementById('message').value.trim();
+  const opportunityId = getOpportunityId();
+
+  if (!contactEmail) return (msgEl.textContent = 'Your email is required.'), (msgEl.className = 'msg error');
+  if (!subject) return (msgEl.textContent = 'A subject is required.'), (msgEl.className = 'msg error');
+  if (!message) return (msgEl.textContent = 'A message is required.'), (msgEl.className = 'msg error');
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  msgEl.textContent = 'Sending…';
+  msgEl.className = 'msg';
+
+  try {
+    const res = await fetch('/api/submit-support-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opportunityId: opportunityId || undefined, contactName, contactEmail, subject, message }),
+    });
+    const body = await res.json();
+    if (!body.ok) throw new Error(body.reason || 'Could not submit your request.');
+
+    msgEl.textContent = 'Got it — a human will follow up soon.';
+    msgEl.className = 'msg success';
+    document.getElementById('subject').value = '';
+    document.getElementById('message').value = '';
+  } catch (err) {
+    msgEl.textContent = err.message;
+    msgEl.className = 'msg error';
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

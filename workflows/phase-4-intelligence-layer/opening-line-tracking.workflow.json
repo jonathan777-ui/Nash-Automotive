@@ -1,0 +1,166 @@
+{
+  "name": "Orbit AI - Phase 4 - Opening-line conversion tracking (W4.7)",
+  "nodes": [
+    {
+      "id": "3e0aed7e-4998-4d87-adbc-5fe3ce9e3210",
+      "name": "Deal outcome webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "opening-line-tracking",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "05 §9: 'Opening-line conversion tracking - Deal outcome, keyed to Deep Dive's recommended opening - Auto (internal analytics).' Input contract: {opportunityId, openingLineId, outcome: 'Won' | 'Lost'}. openingLineId is Opportunity's own field (CRM-OBJECT-MODEL.md, added an earlier pass this session) but NOTHING WRITES IT YET - Deep Dive Research, the service that would recommend an opening line in the first place, isn't built anywhere in this repo (named placeholder in W1.1). This workflow is real, ready analytics logic waiting on that upstream dependency, same status several other workflows built this pass are in - every call is a safe no-op (see 'Has openingLineId?' below) until Deep Dive Research exists and actually sets the field. responseMode: onReceived, not responseNode - callers (stripe-payment-to-crm.workflow.json's Won path, loss-reason-capture.workflow.json's Lost path) fire this and move on, same as alert-dispatcher.workflow.json's own pattern."
+    },
+    {
+      "id": "3206ad6a-8b21-4183-bdaa-f3d204e67ca9",
+      "name": "Has openingLineId?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-960, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.openingLineId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "The safe-no-op gate: most Opportunities won't have an openingLineId at all until Deep Dive Research exists, and that's expected, not an error - this just quietly does nothing on the false branch rather than trying to track analytics against a null key."
+    },
+    {
+      "id": "c582d1a8-6131-4b4d-869d-f9e9a0d3b42c",
+      "name": "Fetch existing OpeningLineStats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-720, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/openingLineStats?filter=openingLineId[eq]:{{ $json.body.openingLineId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New object this pass, CRM-OBJECT-MODEL.md's OpeningLineStats - one row per openingLineId, aggregated win/loss counts. A rollup, not a per-Opportunity log (the Opportunity's own openingLineId field already IS that per-record link)."
+    },
+    {
+      "id": "42e962c1-490a-444b-8a49-c8f807801029",
+      "name": "Extract existing stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.openingLineStats)) return json.data.openingLineStats;\n  if (json && Array.isArray(json.openingLineStats)) return json.openingLineStats;\n  return [];\n}\n\nconst rows = $input.all().flatMap(asArray);\nconst existing = rows[0] || null;\n\nreturn [{\n  json: {\n    exists: !!existing,\n    id: existing?.id,\n    wonCount: existing?.wonCount || 0,\n    lostCount: existing?.lostCount || 0,\n  },\n}];"
+      }
+    },
+    {
+      "id": "cfc03f78-92b3-4e4e-99dc-1000c150daa4",
+      "name": "Stats row exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-240, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.exists }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "bcf8ca4c-8790-4d61-8e53-bf9b0111a9eb",
+      "name": "Increment existing stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/openingLineStats/{{ $json.id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ wonCount: $json.wonCount + ($('Deal outcome webhook').item.json.body.outcome === 'Won' ? 1 : 0), lostCount: $json.lostCount + ($('Deal outcome webhook').item.json.body.outcome === 'Lost' ? 1 : 0) }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "KNOWN RACE CONDITION, flagged rather than silently ignored: a read-then-write increment over plain REST has the same class of gap as hopper-request-next.workflow.json's claim race - two deal outcomes landing on the same openingLineId at nearly the same moment could both read the same count and one increment could be lost. Low real-world impact here (deal outcomes for the same specific opening line landing within milliseconds of each other is unlikely), so not worth the complexity of a claim-and-verify pattern the way the dialer hopper needed - noted, not engineered around."
+    },
+    {
+      "id": "eecc6c7d-31c6-426b-a7c9-b734a25dd796",
+      "name": "Create stats row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/openingLineStats",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ openingLineId: $('Deal outcome webhook').item.json.body.openingLineId, wonCount: $('Deal outcome webhook').item.json.body.outcome === 'Won' ? 1 : 0, lostCount: $('Deal outcome webhook').item.json.body.outcome === 'Lost' ? 1 : 0 }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "First outcome ever recorded for this opening line - creates the rollup row rather than PATCHing something that doesn't exist yet."
+    }
+  ],
+  "connections": {
+    "Deal outcome webhook": {
+      "main": [[{ "node": "Has openingLineId?", "type": "main", "index": 0 }]]
+    },
+    "Has openingLineId?": {
+      "main": [
+        [{ "node": "Fetch existing OpeningLineStats", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Fetch existing OpeningLineStats": {
+      "main": [[{ "node": "Extract existing stats", "type": "main", "index": 0 }]]
+    },
+    "Extract existing stats": {
+      "main": [[{ "node": "Stats row exists?", "type": "main", "index": 0 }]]
+    },
+    "Stats row exists?": {
+      "main": [
+        [{ "node": "Increment existing stats", "type": "main", "index": 0 }],
+        [{ "node": "Create stats row", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

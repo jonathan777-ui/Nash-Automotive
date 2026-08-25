@@ -68,6 +68,41 @@
       "notes": "Same Twenty CRM REST-shape uncertainty as every workflow in this library. These are the exact two fields the DNC-check workflow (phase-2-calendar-nurture-alerts/dnc-check.workflow.json) reads - keep both in sync if either field's name changes once checked against a real instance. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a Lost deal is a pre-sale/Opportunity-level event, so this correctly stays Opportunity-anchored - not moved to Location or Company."
     },
     {
+      "id": "30548c8e-29ff-429c-b381-96321be8814c",
+      "name": "Fetch Opportunity for opening-line",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [140, 60],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Mark-lost webhook').item.json.body.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Fire-and-forget branch feeding opening-line-tracking.workflow.json (W4.7) - needs openingLineId, which this webhook's own input doesn't carry, so it's re-fetched here rather than requiring every caller of THIS webhook to also know and pass it along."
+    },
+    {
+      "id": "fc02a136-59f6-45c4-a4d8-ce46a8d58a1f",
+      "name": "Track opening-line outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [380, 60],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/opening-line-tracking",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Mark-lost webhook').item.json.body.opportunityId, openingLineId: ($json.data || $json).openingLineId, outcome: 'Lost' }) }}",
+        "options": {}
+      },
+      "notes": "A safe no-op today - openingLineId will be null/undefined for every Opportunity until Deep Dive Research exists and sets it, and opening-line-tracking.workflow.json's own 'Has openingLineId?' gate quietly skips a null one."
+    },
+    {
       "id": "1d1b1248-5038-4d71-9c1a-8d349dc82d4d",
       "name": "Respond: recorded",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -102,7 +137,15 @@
       ]
     },
     "Write Lost + reason to Opportunity": {
-      "main": [[{ "node": "Respond: recorded", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          { "node": "Respond: recorded", "type": "main", "index": 0 },
+          { "node": "Fetch Opportunity for opening-line", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Opportunity for opening-line": {
+      "main": [[{ "node": "Track opening-line outcome", "type": "main", "index": 0 }]]
     }
   },
   "active": false,

@@ -182,7 +182,9 @@ may hold Locations under completely different Contracts.
   `opportunityId` (which Opportunity brought it in), `companyId` (nullable — set on Won),
   `contractStatus` (`None` / `ActiveM2M` / `ActiveTerm`), `contractExpiresAt` (nullable),
   `frontDoorAuditStatus`, `frontDoorAuditScore`, `frontDoorAuditReportUrl`,
-  `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`.
+  `frontDoorAuditRefreshedAt` (nullable — new this pass, set only by
+  `front-door-audit-refresh.workflow.json`'s periodic re-check, distinguishing it from the
+  original lead-intake audit), `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`.
 - Assumed REST: `GET/POST/PATCH /rest/locations`, `/rest/locations/{id}`.
 - **Location Contract Lock**: `contractStatus` is the field every lock check reads. A NEW
   Contract-generation attempt on a Location that's already `ActiveM2M`/`ActiveTerm` from an
@@ -285,6 +287,19 @@ without hunting across the four other objects each channel's own logic actually 
   anywhere in this repo yet (no SMS provider — same gap `alert-dispatcher.workflow.json` already
   flags; no social integration named anywhere in the source docs) — there's nothing real to log from
   yet, not an oversight.
+
+### OpeningLineStats (new this pass)
+`05 §9`'s W4.7, "opening-line conversion tracking" — a rollup, not a per-Opportunity log
+(`Opportunity.openingLineId` already is the per-record link). One row per opening line Deep Dive
+Research has ever recommended.
+
+- Fields: `id`, `openingLineId`, `wonCount`, `lostCount`.
+- Assumed REST: `/rest/openingLineStats`, `/rest/openingLineStats/{id}`.
+- Written by `opening-line-tracking.workflow.json`, called (fire-and-forget) from
+  `stripe-payment-to-crm.workflow.json`'s Won path and `loss-reason-capture.workflow.json`'s Lost
+  path. **A safe no-op today** — nothing in this repo writes `Opportunity.openingLineId` yet, since
+  Deep Dive Research (the service that would recommend an opening line) isn't built; every call
+  quietly does nothing until that upstream dependency exists.
 
 ### Rep (Twenty CRM's native user / Workspace Member — extended, not a new object)
 Twenty CRM already has real user accounts for logged-in team members — this isn't a new custom

@@ -83,8 +83,26 @@ genuinely cost- or latency-sensitive bulk task if one ever appears** (e.g. very-
 classification a slower/pricier model isn't worth using) — not a task type this repo has yet. Revisit
 once a second real caller exists to make routing between models a decision with something to test.
 
+## W4.5 — `front-door-audit-refresh.workflow.json` + W4.7 — `opening-line-tracking.workflow.json`
+
+Both real logic waiting on an upstream service, not undecided design:
+
+- **W4.5** re-runs the same named-placeholder Front Door Audit call W1.1 already makes, monthly
+  (this pass's own judgment call — no refresh cadence is brief-given), for every Location on every
+  `LiveClient` Company's active Contract. Fetches the Location's current score first so it can
+  detect a **meaningful change** (≥10 points either direction, also a judgment call) and alert —
+  a regression is a retention risk, an improvement is a genuine upsell/testimonial proof point, per
+  `05 §9`'s own "produces a retention/upsell proof point" framing. Blocked on the same thing W1.1's
+  own call is: the 10 weighted categories still aren't specified anywhere.
+- **W4.7** is a rollup object, `OpeningLineStats` (`CRM-OBJECT-MODEL.md`), incremented on every real
+  deal outcome — wired into `stripe-payment-to-crm.workflow.json`'s Won path and
+  `loss-reason-capture.workflow.json`'s Lost path this pass, both fire-and-forget. Every call is a
+  safe no-op today (an `openingLineId` gate short-circuits cleanly) since nothing writes
+  `Opportunity.openingLineId` yet — Deep Dive Research, the service that would recommend an opening
+  line, isn't built. Tracking activates automatically the moment that dependency lands; no further
+  wiring needed.
+
 ## Still documented-only
 
-W4.5 (Front Door Audit refresh — depends on that service existing, not built), W4.7 (opening-line
-tracking — depends on Deep Dive Research's contract, not built). See `workflows/README.md` for the
-full Phase 4 catalog.
+Nothing left in Phase 4's own catalog except W4.4's un-built halves (see above) — every other entry
+is at least scaffolded. See `workflows/README.md` for the full Phase 4 catalog.

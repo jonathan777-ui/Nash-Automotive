@@ -1,0 +1,209 @@
+{
+  "name": "Orbit AI - Phase 4 - Front Door Audit refresh (W4.5)",
+  "nodes": [
+    {
+      "id": "1b8e616e-ccfa-4a75-914f-df65d57cb378",
+      "name": "1st of month at 5am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1600, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 5 1 * *" }]
+        }
+      },
+      "notes": "05 §9 names 'Front Door Audit refresh' with a trigger of 'Schedule, Stage = Live Client' but no refresh CADENCE - monthly is this pass's own judgment call (a website/AI-answer-engine-readiness score plausibly drifting week to week isn't useful to re-check that often, and not for a full year either), not brief-specified."
+    },
+    {
+      "id": "be516d7b-4107-44db-8839-fcf5bb37a59c",
+      "name": "Fetch LiveClient Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1360, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same query health-scoring.workflow.json/cx-cadence.workflow.json use."
+    },
+    {
+      "id": "34a1a596-4546-4128-a604-82a882d5a611",
+      "name": "Fetch active Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1120, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts?filter=companyId[eq]:{{ $json.id }},status[eq]:Active",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Needs the Contract's locationIds - a Front Door Audit is per-Location (CRM-OBJECT-MODEL.md), and Company itself doesn't carry the site list."
+    },
+    {
+      "id": "3bca3fa0-2a6d-4ce8-9642-706f60a1d818",
+      "name": "Split Locations",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-880, 0],
+      "parameters": {
+        "fieldToSplitOut": "locationIds"
+      },
+      "notes": "ASSUMES the Contract list response's first row is the active Contract found and the field is a plain 'locationIds' array on the current item - same shape as contract-amendment-flow.workflow.json's own handling."
+    },
+    {
+      "id": "0aee9931-12b6-4ad5-ac58-3945229a25ff",
+      "name": "Fetch Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-640, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.locationIds }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Needed for the Location's CURRENT frontDoorAuditScore before it gets overwritten below - the whole point of this workflow is detecting a meaningful change, not just re-stamping a number."
+    },
+    {
+      "id": "a3c441fe-d73c-4be2-a58c-ddb8bae55ebe",
+      "name": "Call Front Door Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FRONT_DOOR_AUDIT_URL || 'PLACEHOLDER_FRONT_DOOR_AUDIT_URL' }}/audit",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ locationId: $json.id, gbpUrl: $json.gbpUrl }) }}",
+        "options": {}
+      },
+      "notes": "Same named-placeholder service W1.1's own Front Door Audit call uses (workflows/README.md: the 10 weighted categories and their scoring aren't specified anywhere, so there's nothing real to call yet) - this workflow is real, ready wiring for when that service exists, not blocked on anything specific to REFRESHING versus the initial audit."
+    },
+    {
+      "id": "a3908a2a-ab64-4257-99e6-6831f203fdb9",
+      "name": "Compute score delta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 0],
+      "parameters": {
+        "jsCode": "// A >=10-point swing either direction is this pass's own judgment call for 'meaningful,' not\n// brief-specified - big enough to not be noise, small enough to still catch a real regression\n// or improvement worth a human's attention.\nconst SIGNIFICANT_DELTA = 10;\n\nconst previousScore = $('Fetch Location').item.json.frontDoorAuditScore ?? null;\nconst newScore = $json.score;\nconst delta = previousScore === null ? null : newScore - previousScore;\nconst significant = delta !== null && Math.abs(delta) >= SIGNIFICANT_DELTA;\n\nreturn [{\n  json: {\n    locationId: $('Fetch Location').item.json.id,\n    locationName: $('Fetch Location').item.json.name,\n    newScore,\n    reportUrl: $json.reportUrl,\n    previousScore,\n    delta,\n    significant,\n  },\n}];"
+      }
+    },
+    {
+      "id": "5be981ca-89c2-46c7-9372-1fa696e55bc1",
+      "name": "Write refreshed score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.locationId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ frontDoorAuditScore: $json.newScore, frontDoorAuditReportUrl: $json.reportUrl, frontDoorAuditRefreshedAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "frontDoorAuditRefreshedAt is new this pass (CRM-OBJECT-MODEL.md's Location object) - distinguishes 'the original audit from lead intake' from 'a live client's periodic refresh,' so a future workflow can tell whether a score is fresh without re-deriving it from Company.status."
+    },
+    {
+      "id": "f4e2d43b-05f4-4b7a-87d1-75a1a9c6f6fa",
+      "name": "Significant change?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [320, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Compute score delta').item.json.significant }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ec3d0f7b-c47a-4a7b-b086-a3ccb5c43331",
+      "name": "Alert: Front Door Audit score changed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: $('Compute score delta').item.json.delta < 0 ? 'warning' : 'info', source: 'front-door-audit-refresh', message: $('Compute score delta').item.json.locationName + \"'s Front Door Audit score \" + ($('Compute score delta').item.json.delta < 0 ? 'dropped' : 'improved') + ' by ' + Math.abs($('Compute score delta').item.json.delta) + ' points (' + $('Compute score delta').item.json.previousScore + ' -> ' + $('Compute score delta').item.json.newScore + ').', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/location/' + $('Compute score delta').item.json.locationId }) }}",
+        "options": {}
+      },
+      "notes": "'Produces a retention/upsell proof point, not itself an external send' per 05 §9's own Gate description - a regression is a retention risk worth a CX rep's attention (warning severity, routes to #cx-retention via alertRouting.ts), an improvement is a genuine upsell/testimonial proof point (info severity, same channel)."
+    }
+  ],
+  "connections": {
+    "1st of month at 5am": {
+      "main": [[{ "node": "Fetch LiveClient Companies", "type": "main", "index": 0 }]]
+    },
+    "Fetch LiveClient Companies": {
+      "main": [[{ "node": "Fetch active Contract", "type": "main", "index": 0 }]]
+    },
+    "Fetch active Contract": {
+      "main": [[{ "node": "Split Locations", "type": "main", "index": 0 }]]
+    },
+    "Split Locations": {
+      "main": [[{ "node": "Fetch Location", "type": "main", "index": 0 }]]
+    },
+    "Fetch Location": {
+      "main": [[{ "node": "Call Front Door Audit", "type": "main", "index": 0 }]]
+    },
+    "Call Front Door Audit": {
+      "main": [[{ "node": "Compute score delta", "type": "main", "index": 0 }]]
+    },
+    "Compute score delta": {
+      "main": [[{ "node": "Write refreshed score", "type": "main", "index": 0 }]]
+    },
+    "Write refreshed score": {
+      "main": [[{ "node": "Significant change?", "type": "main", "index": 0 }]]
+    },
+    "Significant change?": {
+      "main": [
+        [{ "node": "Alert: Front Door Audit score changed", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

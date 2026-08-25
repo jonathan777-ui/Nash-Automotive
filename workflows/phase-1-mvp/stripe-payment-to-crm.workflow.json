@@ -271,6 +271,22 @@
       "notes": "RENAMED from 'Live Client' to 'Won', matching 05 Section 7's own literal wording ('all Locations on the Contract reach Won together') - 'Live Client' was this workflow's own earlier invention before the object model existed; the ongoing-client status now belongs on the Company (set 'LiveClient' by the Create Company node above), not the Opportunity, per CRM-OBJECT-MODEL.md's load-bearing pre-sale/post-sale distinction. onboardingProvisioningStatus:'Pending' kept from the previous version - W6.3's onboarding provisioning automation is still documented-only, not built. Same Twenty CRM REST-shape uncertainty as every workflow here."
     },
     {
+      "id": "8fb673b4-70b1-4a73-b6ba-832ab9ae7151",
+      "name": "Track opening-line outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/opening-line-tracking",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Verify signature & classify event').item.json.opportunityId, openingLineId: ($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).openingLineId, outcome: 'Won' }) }}",
+        "options": {}
+      },
+      "notes": "Fire-and-forget, feeding opening-line-tracking.workflow.json (W4.7) - a safe no-op today since nothing writes openingLineId yet (Deep Dive Research isn't built). Reuses the Opportunity already fetched earlier in this workflow rather than a second GET."
+    },
+    {
       "id": "753bb0b4-3a29-49e8-80eb-c862d24197ca",
       "name": "Respond: handled",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -355,7 +371,12 @@
       "main": [[{ "node": "Advance Opportunity to Won", "type": "main", "index": 0 }]]
     },
     "Advance Opportunity to Won": {
-      "main": [[{ "node": "Respond: handled", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          { "node": "Respond: handled", "type": "main", "index": 0 },
+          { "node": "Track opening-line outcome", "type": "main", "index": 0 }
+        ]
+      ]
     }
   },
   "active": false,

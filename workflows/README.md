@@ -239,9 +239,9 @@ timeline, and fires W3.4 fire-and-forget for AI QA only when a transcript is act
 | W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | **Scaffolded** — `phase-4-intelligence-layer/tier-upgrade-signal.workflow.json` |
 | W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json`. **Object model migration:** moved from querying Opportunities (`stage=LiveClient`, a state Opportunities no longer reach) to querying Companies (`status=LiveClient`) — this was a real bug, not a style fix; see the CRM Architecture section below. |
 | W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | **Partially scaffolded** — the human-gate mechanism is Tag-for-Action's (Command Center Step 5), the digest is `phase-4-intelligence-layer/ai-activity-summary.workflow.json` |
-| W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | Documented only |
+| W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | **Scaffolded** — `phase-4-intelligence-layer/front-door-audit-refresh.workflow.json` |
 | W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | **Scaffolded** — `phase-4-intelligence-layer/loss-reason-capture.workflow.json` |
-| W4.7 | Opening-line conversion tracking | Deal outcome, keyed to Deep Dive's recommended opening | Auto (internal analytics) | Documented only |
+| W4.7 | Opening-line conversion tracking | Deal outcome, keyed to Deep Dive's recommended opening | Auto (internal analytics) | **Scaffolded** — `phase-4-intelligence-layer/opening-line-tracking.workflow.json`, wired into both W1.6's Won path and W4.6's Lost path |
 
 **W4.1/W4.2 built this pass** — see `phase-4-intelligence-layer/README.md` for the full detail: a
 health/usage-scoring formula (a judgment call, not brief-specified — `05 §9` names the heading with
@@ -256,11 +256,14 @@ was already Tag-for-Action's (Command Center Step 5), "chat-invoked... not a new
 exactly why; the daily AI Activity Summary digest is new. Model routing (Claude/Gemini/Grok) is
 documented as policy, not built as a router — no second real caller exists yet to route between.
 
-W4.5/W4.7 are each blocked on something
-upstream that doesn't exist yet, not on an undecided design: W4.5 needs the Front Door Audit service
-itself first (not built — see Phase 1); W4.7 needs Deep Dive Research's opening-line recommendation
-to actually be a trackable, ID'd field on the Opportunity, which depends on Deep Dive Research's own
-contract (also not built — see Phase 1).
+**W4.5/W4.7 built this pass, both as real logic waiting on an upstream dependency rather than staying
+undocumented.** W4.5 calls the same named-placeholder Front Door Audit service W1.1 already calls
+(the 10 weighted categories still aren't specified anywhere — that's the real blocker, and it blocks
+the service, not this workflow's own logic, which is ready). W4.7's `openingLineId` gate is a safe
+no-op until Deep Dive Research exists and starts setting that field — every real deal outcome
+(`stripe-payment-to-crm.workflow.json`'s Won path, `loss-reason-capture.workflow.json`'s Lost path)
+already calls it, so tracking activates automatically the moment that upstream dependency lands, with
+no further wiring needed.
 
 ## Phase 5 — Telnyx Activation
 

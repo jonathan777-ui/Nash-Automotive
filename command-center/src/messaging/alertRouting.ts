@@ -19,7 +19,7 @@ const ROUTES: readonly { readonly match: readonly string[]; readonly channel: st
   { match: ['onboarding'], channel: 'onboarding' },
   { match: ['referral-trigger', 'health-scoring', 'tier-upgrade', 'churn', 'cx-'], channel: 'cx-retention' },
   { match: ['missed-follow-up'], channel: 'missed-follow-ups' },
-  { match: ['contract-amendment', 'billing-period'], channel: 'accounting' },
+  { match: ['contract-amendment', 'billing-period', 'refund'], channel: 'accounting' },
   { match: ['ai-activity', 'ai-employee', 'ai-agent'], channel: 'ai-agents' },
 ];
 

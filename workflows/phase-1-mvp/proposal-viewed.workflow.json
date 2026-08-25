@@ -1,0 +1,102 @@
+{
+  "name": "Orbit AI - Phase 1 - Proposal viewed (new, not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "64b5a6a9-1fd0-485b-95e5-c1cd4ad6db52",
+      "name": "Proposal viewed webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1000, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proposal-viewed",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "Called by portal/netlify/functions/proposal-viewed.mts, a fire-and-forget beacon fired the moment proposal.html actually renders for a visitor. Input: {opportunityId}. onReceived, not responseNode - the portal function doesn't wait on this either."
+    },
+    {
+      "id": "4b2a233a-c545-4e1a-8260-b20396001924",
+      "name": "Fetch Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-760, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Checked before writing so a repeat view (someone re-opening the link) doesn't keep resetting the timestamp - portal-abandonment-followup.workflow.json needs the FIRST view time to measure abandonment from, not the latest."
+    },
+    {
+      "id": "10ccb840-95ed-4d1f-937e-2721c0369f2b",
+      "name": "Not yet recorded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-520, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.data || $json).proposalViewedAt }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "91119b55-eda6-4f33-aaa0-ee22c88d00e5",
+      "name": "Set proposalViewedAt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Proposal viewed webhook').item.json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ proposalViewedAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New field this pass, CRM-OBJECT-MODEL.md's Opportunity object - the 'portal abandonment' signal 06's audit-gap list names ('targeted follow-up on incomplete e-sign') needs a real 'was this actually opened' timestamp to measure from."
+    }
+  ],
+  "connections": {
+    "Proposal viewed webhook": {
+      "main": [[{ "node": "Fetch Opportunity", "type": "main", "index": 0 }]]
+    },
+    "Fetch Opportunity": {
+      "main": [[{ "node": "Not yet recorded?", "type": "main", "index": 0 }]]
+    },
+    "Not yet recorded?": {
+      "main": [
+        [{ "node": "Set proposalViewedAt", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

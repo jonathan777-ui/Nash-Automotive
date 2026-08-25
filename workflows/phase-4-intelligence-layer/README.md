@@ -102,6 +102,20 @@ Both real logic waiting on an upstream service, not undecided design:
   line, isn't built. Tracking activates automatically the moment that dependency lands; no further
   wiring needed.
 
+## New this pass — `churn-winback.workflow.json` (`06`'s audit-gap list, not brief-W-numbered)
+
+Weekly (judgment-call cadence — nothing in the source docs gives churn detection a schedule the way
+CX cadence's 7/30/60/90-day numbers are given, and `engagementScore` only recomputes once a day
+anyway), fetches `LiveClient` Companies and flags any whose `engagementScore` (W4.1, above) has
+dropped below a judgment-call threshold (25 of a possible 100) and hasn't already been flagged in the
+last 30 days (cooldown, prevents re-drafting the same still-at-risk company every single week). Drafts
+a warm retention check-in via Claude — explicitly instructed never to expose the score or imply an
+algorithm flagged the client — and alerts `#cx-retention` at `warning` severity (routine nurture/CX
+drafts alert at `info`; a churn signal gets more visibility). Draft-only, human sends, same automation
+risk boundary as every other outbound-touch workflow in this repo. **Directly depends on W4.1** —
+before `health-scoring.workflow.json` existed, this workflow would have had `engagementScore` to read
+on no Company at all.
+
 ## Still documented-only
 
 Nothing left in Phase 4's own catalog except W4.4's un-built halves (see above) — every other entry

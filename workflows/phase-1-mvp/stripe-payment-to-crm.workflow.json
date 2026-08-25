@@ -25,9 +25,9 @@
       "typeVersion": 2,
       "position": [-1160, 0],
       "parameters": {
-        "jsCode": "const crypto = require('crypto');\nconst secret = $env.STRIPE_WEBHOOK_SECRET || 'PLACEHOLDER_STRIPE_WEBHOOK_SECRET';\nconst sigHeader = $input.first().json.headers['stripe-signature'] || '';\nconst rawBody = $input.first().json.body /* ASSUMES this is the raw string, per the rawBody option on the Stripe webhook node - not verified */;\n\nconst parts = Object.fromEntries(sigHeader.split(',').map((kv) => kv.split('=')));\nconst signedPayload = `${parts.t}.${rawBody}`;\nconst expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');\n\nlet valid = false;\ntry {\n  valid = crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(parts.v1 || '', 'hex'));\n} catch (e) {\n  valid = false; // length mismatch etc. - definitely not a valid signature\n}\n\nconst event = valid ? JSON.parse(rawBody) : null;\nconst RELEVANT_TYPES = ['checkout.session.completed', 'payment_intent.succeeded'];\n\n// Tier prices per portal/netlify/functions/lib/createCheckoutSession.ts's TIER_PRICES_CENTS -\n// reverse-looked-up from the paid amount rather than trusting a metadata field, since the portal\n// doesn't currently set a tier metadata key (only opportunityId) - avoids needing a second\n// coordinated change over there for this workflow to know what was actually purchased.\nconst TIER_PRICES_CENTS = { Gold: 75000, Platinum: 165000, Iridium: 260000 };\nconst amountTotal = event?.data?.object?.amount_total ?? event?.data?.object?.amount ?? null;\nconst tier = Object.keys(TIER_PRICES_CENTS).find((t) => TIER_PRICES_CENTS[t] === amountTotal) || 'Unknown';\n\nreturn [{\n  json: {\n    ok: valid,\n    handled: valid && RELEVANT_TYPES.includes(event?.type),\n    eventType: event?.type,\n    opportunityId: event?.data?.object?.metadata?.opportunityId,\n    amountTotalCents: amountTotal,\n    tier,\n  },\n}];"
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.STRIPE_WEBHOOK_SECRET || 'PLACEHOLDER_STRIPE_WEBHOOK_SECRET';\nconst sigHeader = $input.first().json.headers['stripe-signature'] || '';\nconst rawBody = $input.first().json.body /* ASSUMES this is the raw string, per the rawBody option on the Stripe webhook node - not verified */;\n\nconst parts = Object.fromEntries(sigHeader.split(',').map((kv) => kv.split('=')));\nconst signedPayload = `${parts.t}.${rawBody}`;\nconst expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');\n\nlet valid = false;\ntry {\n  valid = crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(parts.v1 || '', 'hex'));\n} catch (e) {\n  valid = false; // length mismatch etc. - definitely not a valid signature\n}\n\nconst event = valid ? JSON.parse(rawBody) : null;\nconst SUCCESS_TYPES = ['checkout.session.completed', 'payment_intent.succeeded'];\n// 06's audit-gap list: 'failed/declined payment handling - retry/dunning, distinct CRM state' -\n// new this pass, previously only success events were classified at all.\nconst FAILED_TYPES = ['payment_intent.payment_failed', 'checkout.session.expired'];\nconst RELEVANT_TYPES = [...SUCCESS_TYPES, ...FAILED_TYPES];\n\n// Tier prices per portal/netlify/functions/lib/createCheckoutSession.ts's TIER_PRICES_CENTS -\n// reverse-looked-up from the paid amount rather than trusting a metadata field, since the portal\n// doesn't currently set a tier metadata key (only opportunityId) - avoids needing a second\n// coordinated change over there for this workflow to know what was actually purchased.\nconst TIER_PRICES_CENTS = { Gold: 75000, Platinum: 165000, Iridium: 260000 };\nconst amountTotal = event?.data?.object?.amount_total ?? event?.data?.object?.amount ?? null;\nconst tier = Object.keys(TIER_PRICES_CENTS).find((t) => TIER_PRICES_CENTS[t] === amountTotal) || 'Unknown';\n\nreturn [{\n  json: {\n    ok: valid,\n    handled: valid && RELEVANT_TYPES.includes(event?.type),\n    isFailure: valid && FAILED_TYPES.includes(event?.type),\n    eventType: event?.type,\n    opportunityId: event?.data?.object?.metadata?.opportunityId,\n    amountTotalCents: amountTotal,\n    tier,\n    failureReason: event?.data?.object?.last_payment_error?.message || null,\n  },\n}];"
       },
-      "notes": "Implements Stripe's documented signature scheme (t=timestamp,v1=hexHMAC over `${t}.${rawBody}` with the webhook secret) - the algorithm itself is stable public Stripe documentation, but this hasn't been tested against a real Stripe webhook delivery, and depends entirely on the previous node's raw-body assumption holding. ALSO ASSUMES the Checkout Session (or PaymentIntent) was created with metadata.opportunityId set to the Twenty CRM Opportunity ID - portal/netlify/functions/create-checkout-session.mts sets this already. Tier is reverse-derived from the paid amount against the brief's own known tier prices (Gold/Platinum/Iridium) - 'Unknown' for anything that doesn't match exactly (e.g. Rhodium's custom pricing), which downstream nodes should treat as a signal to flag for human review, not silently proceed as if it were a known tier."
+      "notes": "Implements Stripe's documented signature scheme (t=timestamp,v1=hexHMAC over `${t}.${rawBody}` with the webhook secret) - the algorithm itself is stable public Stripe documentation, but this hasn't been tested against a real Stripe webhook delivery, and depends entirely on the previous node's raw-body assumption holding. ALSO ASSUMES the Checkout Session (or PaymentIntent) was created with metadata.opportunityId set to the Twenty CRM Opportunity ID - portal/netlify/functions/create-checkout-session.mts sets this already. Tier is reverse-derived from the paid amount against the brief's own known tier prices (Gold/Platinum/Iridium) - 'Unknown' for anything that doesn't match exactly (e.g. Rhodium's custom pricing), which downstream nodes should treat as a signal to flag for human review, not silently proceed as if it were a known tier. isFailure/failureReason are new this pass - a failed/expired payment now routes to a distinct dunning path (see 'Payment succeeded?' below) instead of being silently ignored as an 'irrelevant' event."
     },
     {
       "id": "06641884-801d-43ee-9a78-cf0475ae6425",
@@ -74,11 +74,34 @@
       }
     },
     {
+      "id": "c1a3f6ea-2f4e-4b0a-9e2d-6d6e1a2b0c3d",
+      "name": "Payment succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-440, -160],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.isFailure }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "false", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "06's audit-gap list: 'failed/declined payment handling - retry/dunning, distinct CRM state.' Splits the 'handled' (relevant) event stream in two - TRUE (isFailure is false, i.e. a real success) continues into the existing Won/Contract-creation path unchanged below; FALSE (a payment_intent.payment_failed or checkout.session.expired event) branches into a separate dunning path that writes a distinct Opportunity state and alerts a rep, instead of - as it would have before this pass - flowing straight into the Won-creation logic just because 'handled' was true for both."
+    },
+    {
       "id": "fc954e30-e230-42c2-9371-57174d7b4aeb",
       "name": "Fetch Opportunity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-440, -280],
+      "position": [-200, -280],
       "parameters": {
         "method": "GET",
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Verify signature & classify event').item.json.opportunityId }}",
@@ -287,6 +310,63 @@
       "notes": "Fire-and-forget, feeding opening-line-tracking.workflow.json (W4.7) - a safe no-op today since nothing writes openingLineId yet (Deep Dive Research isn't built). Reuses the Opportunity already fetched earlier in this workflow rather than a second GET."
     },
     {
+      "id": "d2b4e7fa-8c1d-4a3e-9b5f-7e0a1c2d3e4f",
+      "name": "Fetch Opportunity (dunning)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 120],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Verify signature & classify event').item.json.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Separate GET from the success path's 'Fetch Opportunity' (different branch entirely, no shared execution) - needed to read the current dunningAttemptCount so 'Write dunning state' can increment it rather than overwrite it, and companyName for the alert message."
+    },
+    {
+      "id": "e3c5f8ab-9d2e-4b1f-a6c7-8f1b2d3e4f5a",
+      "name": "Write dunning state",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 120],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Verify signature & classify event').item.json.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ paymentStatus: 'Failed', dunningAttemptCount: (($('Fetch Opportunity (dunning)').item.json.data || $('Fetch Opportunity (dunning)').item.json).dunningAttemptCount || 0) + 1, lastPaymentFailureReason: $('Verify signature & classify event').item.json.failureReason }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New fields this pass, CRM-OBJECT-MODEL.md's Opportunity object: paymentStatus:'Failed' is a distinct state from the 'Paid' the success path writes (06's exact framing: 'distinct CRM state'), dunningAttemptCount increments on every failed/expired event so a rep can see this isn't the first attempt, lastPaymentFailureReason carries Stripe's own last_payment_error.message through for context. No automatic retry is triggered here - retrying a charge is a billing action, gated to a human per the automation risk boundary, same as every other billing/contract-stage decision in this repo."
+    },
+    {
+      "id": "f4d6a9bc-ae3f-4c20-b7d8-9a2c3d4e5f6b",
+      "name": "Alert: payment failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'stripe-payment-dunning', message: (($('Fetch Opportunity (dunning)').item.json.data || $('Fetch Opportunity (dunning)').item.json).companyName || 'Unknown company') + ' - payment failed (' + $('Verify signature & classify event').item.json.eventType + '): ' + ($('Verify signature & classify event').item.json.failureReason || 'no reason given') + '. Attempt #' + ((($('Fetch Opportunity (dunning)').item.json.data || $('Fetch Opportunity (dunning)').item.json).dunningAttemptCount || 0) + 1) + '.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Verify signature & classify event').item.json.opportunityId }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #portal-conversion (alertRouting.ts substring-matches 'stripe-payment' in the source string, and 'stripe-payment-dunning' contains it). severity:'warning', not 'critical' - a single failed payment isn't yet an emergency, a human just needs to see it and decide whether to follow up or retry the charge manually in Stripe. Recomputes the attempt count from 'Fetch Opportunity (dunning)' the same way 'Write dunning state' did, rather than trusting the PATCH response to echo the updated record back - that shape isn't verified for this Twenty CRM assumption, so this node doesn't depend on it."
+    },
+    {
       "id": "753bb0b4-3a29-49e8-80eb-c862d24197ca",
       "name": "Respond: handled",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -296,6 +376,18 @@
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify({ ok: true, handled: true }) }}"
       }
+    },
+    {
+      "id": "a6b8c1de-3f4a-4e5b-8c9d-0e1f2a3b4c5d",
+      "name": "Respond: handled (dunning)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [520, 120],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, handled: true, isFailure: true }) }}"
+      },
+      "notes": "Responds 200 to Stripe same as the success path - the webhook was received and processed correctly either way; a failed payment isn't a webhook-delivery error, it's a business event this workflow now handles on its own distinct path."
     },
     {
       "id": "e49b663c-bf08-42bc-8cff-0b7a374ad6da",
@@ -337,9 +429,24 @@
     },
     "Relevant event type?": {
       "main": [
-        [{ "node": "Fetch Opportunity", "type": "main", "index": 0 }],
+        [{ "node": "Payment succeeded?", "type": "main", "index": 0 }],
         [{ "node": "Respond: ignored (valid, not relevant)", "type": "main", "index": 0 }]
       ]
+    },
+    "Payment succeeded?": {
+      "main": [
+        [{ "node": "Fetch Opportunity", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Opportunity (dunning)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Opportunity (dunning)": {
+      "main": [[{ "node": "Write dunning state", "type": "main", "index": 0 }]]
+    },
+    "Write dunning state": {
+      "main": [[{ "node": "Alert: payment failed", "type": "main", "index": 0 }]]
+    },
+    "Alert: payment failed": {
+      "main": [[{ "node": "Respond: handled (dunning)", "type": "main", "index": 0 }]]
     },
     "Fetch Opportunity": {
       "main": [[{ "node": "Check Location Contract Lock", "type": "main", "index": 0 }]]

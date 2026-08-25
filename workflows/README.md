@@ -309,6 +309,21 @@ to build now.
 
 ---
 
+## Audit gaps closed (`06 - Recent Changes Summary`'s audit-gap list, not brief-W-numbered)
+
+Six specific gaps `06` named without giving them their own W-number. All six built this pass:
+
+| Gap | Workflow(s) | Detail |
+|---|---|---|
+| TCPA consent capture | `phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` (write) + `phase-3-dialer-hopper/hopper-load-campaign.workflow.json` (enforce) | `phase-1-mvp/README.md` |
+| Call recording disclosure | *(deferred — folded into Phase 5's Telnyx build, since disclosure is a call-flow/IVR concern that doesn't exist until the dialer itself does)* | `phase-3-dialer-hopper/README.md` once built |
+| Portal abandonment | `phase-1-mvp/proposal-viewed.workflow.json` + `phase-1-mvp/portal-abandonment-followup.workflow.json` | `phase-1-mvp/README.md` |
+| Failed/declined payment — dunning | `phase-1-mvp/stripe-payment-to-crm.workflow.json` (dunning branch) | `phase-1-mvp/README.md` |
+| Refund gate | `phase-1-mvp/refund-request.workflow.json` | `phase-1-mvp/README.md` |
+| Churn/win-back | `phase-4-intelligence-layer/churn-winback.workflow.json` | `phase-4-intelligence-layer/README.md` |
+
+---
+
 ## CRM Architecture (05 §13, FINAL v4 / LOCKED) — cross-cutting, not phase-specific
 
 **Superseded by `CRM-OBJECT-MODEL.md` at the repo root, which is now the canonical reference** — the

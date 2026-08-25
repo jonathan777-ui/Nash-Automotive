@@ -1,0 +1,133 @@
+{
+  "name": "Orbit AI - Phase 1 - Refund request gate (new, not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+      "name": "Refund request webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "refund-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "06's audit-gap list: 'refund gate.' Called by whatever initiates a refund conversation (a rep via a future Deals Desk UI action, a support-ticket intake workflow once W6.x is built) with {opportunityId, contractId (nullable), requestedAmountCents, reason, requestedByEmail}. This workflow is a GATE, not a processor - it never calls Stripe's refund API and never writes a 'refunded' status anywhere. It only logs the request durably and puts it in front of a human. Deliberately NOT built on the ai_action_requests table (command-center/src/messaging/db.ts) - that table is specifically the AI-employee human-approval queue (Tag-for-Action's human-to-AI half); a refund request isn't an AI action awaiting approval, it's a human business decision that was never going to be automated in the first place, so it gets its own durable log (Activity Event) instead."
+    },
+    {
+      "id": "c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f",
+      "name": "Fetch Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Only for companyName context in the alert/notification below - this workflow never writes back to the Opportunity itself. A refund is a Contract/BillingPeriod-level financial event, not a stage change, and CRM-OBJECT-MODEL.md doesn't define a refund-specific Opportunity field."
+    },
+    {
+      "id": "d3e4f5a6-b7c8-4d9e-af01-2b3c4d5e6f7a",
+      "name": "Log to Activity Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/activityEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Refund request webhook').item.json.body.opportunityId, type: 'RefundRequested', contractId: $('Refund request webhook').item.json.body.contractId || null, requestedAmountCents: $('Refund request webhook').item.json.body.requestedAmountCents, note: $('Refund request webhook').item.json.body.reason, by: $('Refund request webhook').item.json.body.requestedByEmail, at: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same /rest/activityEvents shape dnc-check.workflow.json's override log already uses ('Log override to Activity Event') - the durable, permanent record that a refund was requested, who requested it, and why. Nothing about this record implies approval or completion; it's a paper trail, not a transaction."
+    },
+    {
+      "id": "e4f5a6b7-c8d9-4eaf-b012-3c4d5e6f7a8b",
+      "name": "Notify accounting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/notifications",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipientEmail: $env.ACCOUNTING_NOTIFICATION_EMAIL || 'PLACEHOLDER_ACCOUNTING_EMAIL', summary: 'Refund requested for ' + (($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).companyName || 'unknown company') + ': $' + (($('Refund request webhook').item.json.body.requestedAmountCents || 0) / 100).toFixed(2) + ' - ' + $('Refund request webhook').item.json.body.reason, linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Refund request webhook').item.json.body.opportunityId }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "Same personal-notification pattern tag-for-action.workflow.json's 'Notify human target' uses, reusing the Command Center Alerts Ingest credential (ALERTS_INGEST_SECRET) - Command Center's routes.ts trusts /api/notifications the same as /api/alerts. ACCOUNTING_NOTIFICATION_EMAIL is a new env var, not previously used anywhere in this repo - who actually processes refunds isn't specified by the brief, so this is a single named recipient rather than a channel, matching Tag-for-Action's own 'personal notification' delivery for a decision that needs one accountable owner."
+    },
+    {
+      "id": "f5a6b7c8-d9ea-4fb0-9123-4d5e6f7a8b9c",
+      "name": "Alert: refund requested",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'refund-request', message: (($('Fetch Opportunity').item.json.data || $('Fetch Opportunity').item.json).companyName || 'unknown company') + ' requested a refund of $' + (($('Refund request webhook').item.json.body.requestedAmountCents || 0) / 100).toFixed(2) + ' - ' + $('Refund request webhook').item.json.body.reason + '. No refund has been processed; a human must action this.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Refund request webhook').item.json.body.opportunityId }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #accounting - alertRouting.ts's accounting route now matches 'refund' alongside 'contract-amendment'/'billing-period' (command-center/src/messaging/alertRouting.ts, edited this pass). Fans out from 'Log to Activity Event' in parallel with 'Notify accounting' and 'Respond: logged' - three independent branches off the same durable write, same fan-out shape as 'Advance Opportunity to Won' in stripe-payment-to-crm.workflow.json (one response node among several parallel branches, never gated behind the fire-and-forget ones, so the webhook caller isn't left waiting on - or double-responded to by - branches that don't affect what gets returned)."
+    },
+    {
+      "id": "a6b7c8d9-eafb-4012-a234-5e6f7a8b9c0d",
+      "name": "Respond: logged",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-440, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, logged: true, refunded: false, note: 'Request logged and routed to a human for review. No refund has been processed by this workflow.' }) }}"
+      },
+      "notes": "refunded:false is explicit, not just an absent field - whatever calls this webhook should never mistake 'the gate accepted the request' for 'the refund happened.'"
+    }
+  ],
+  "connections": {
+    "Refund request webhook": {
+      "main": [[{ "node": "Fetch Opportunity", "type": "main", "index": 0 }]]
+    },
+    "Fetch Opportunity": {
+      "main": [[{ "node": "Log to Activity Event", "type": "main", "index": 0 }]]
+    },
+    "Log to Activity Event": {
+      "main": [
+        [
+          { "node": "Notify accounting", "type": "main", "index": 0 },
+          { "node": "Alert: refund requested", "type": "main", "index": 0 },
+          { "node": "Respond: logged", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

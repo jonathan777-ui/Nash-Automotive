@@ -153,7 +153,14 @@ kept growing across passes without a canonical list.
   Opportunity can span multiple Locations), `stage` (`DemoQueue` / `PendingDemos` / `NoShow` /
   `Rescheduled` / `DemoCompleted` / `FutureFollowUp` / `Won` / `Lost` / `Expansion` — the last is new
   this pass, set by `contract-amendment-flow.workflow.json` on an EXISTING client's upsell deal, not
-  part of the new-logo Demo-Queue-through-Won sequence), `paymentStatus`, `onboardingProvisioningStatus`,
+  part of the new-logo Demo-Queue-through-Won sequence), `paymentStatus` (`Paid` / `Failed` — `Failed`
+  is new this pass, `06`'s audit-gap list: "failed/declined payment handling — retry/dunning, distinct
+  CRM state," written by `stripe-payment-to-crm.workflow.json`'s dunning branch on a
+  `payment_intent.payment_failed`/`checkout.session.expired` Stripe event),
+  `dunningAttemptCount` (integer, new this pass — increments on every failed/expired event for the
+  same Opportunity; no automatic retry, a human decides whether/how to retry the charge, per the
+  automation risk boundary), `lastPaymentFailureReason` (string, nullable, new this pass — Stripe's
+  own `last_payment_error.message`, carried through for rep context), `onboardingProvisioningStatus`,
   `companyId` (nullable — set once Won), `contractId` (nullable — set once Won or Amended),
   `restrictionReason` (`DNC` / `Not Interested` / `Bad Information`, nullable — post-loss routing),
   `postLossTrack` (`Nurture` / `Restricted`, nullable), `lastCallDisposition` (rep-entered, see
@@ -164,7 +171,11 @@ kept growing across passes without a canonical list.
   Research opening-line recommendation this lead got, for W4.7's conversion tracking; not yet
   written by anything since Deep Dive Research itself isn't built in this repo),
   `lastNurtureTouchAt`/`nurtureWave`/`lastNurtureDraftText` (`nurture-cadence.workflow.json`'s own
-  state, scoped to `postLossTrack: 'Nurture'` opportunities).
+  state, scoped to `postLossTrack: 'Nurture'` opportunities), `tcpaConsent` (boolean, new this pass —
+  `05 §1`: "TCPA consent capture — recorded at entry; no consent = excluded from auto-dial." Recorded
+  by W1.1 at intake, coerced to a strict boolean rather than trusted as-is so a missing/malformed
+  value defaults to `false`, not `true`. Enforced by `hopper-load-campaign.workflow.json` — an
+  Opportunity without confirmed consent is silently never queued into an auto-dial campaign).
 - Assumed REST: `/rest/opportunities`, `/rest/opportunities/{id}`.
 - **`Expansion` is not a new-logo stage** — an Opportunity reaching `Expansion` didn't travel
   DemoQueue→...→Won first; it's created directly (or reused) specifically to represent an existing
@@ -206,7 +217,12 @@ Opportunity — see the load-bearing distinction above.
   explicitly), `engagementScore`/`currentTier` (new this pass — `health-scoring.workflow.json`'s
   own output, a judgment-call formula since `05 §9` names "health/usage scoring" as a heading with
   no formula given; see that workflow's own notes for exactly what it's built from and why it
-  deliberately avoids faking a usage/telemetry signal this repo has no real pipeline for).
+  deliberately avoids faking a usage/telemetry signal this repo has no real pipeline for),
+  `churnWinbackSentAt`/`churnWinbackAttemptCount`/`churnWinbackDraftText` (new this pass —
+  `churn-winback.workflow.json`'s own state, `06`'s audit-gap list: "churn/win-back." Keyed off
+  `engagementScore` dropping below a judgment-call threshold rather than a calendar cadence like
+  `lastCxTouchAt`/`cxWave`, since nothing in the source docs gives churn detection a fixed schedule
+  the way CX cadence's 7/30/60/90-day numbers are given).
 - Assumed REST: `/rest/companies`, `/rest/companies/{id}`.
 
 ### Organization

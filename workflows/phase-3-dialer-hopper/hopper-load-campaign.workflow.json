@@ -46,9 +46,9 @@
       "position": [-320, -120],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, campaignId: $json.id, entriesQueued: $('Load campaign webhook').item.json.body.opportunityIds.length }) }}"
+        "responseBody": "={{ JSON.stringify({ ok: true, campaignId: $json.id, opportunityIdsRequested: $('Load campaign webhook').item.json.body.opportunityIds.length }) }}"
       },
-      "notes": "Responds as soon as the Campaign itself exists, not after every HopperEntry is created - the entry-creation loop (below) is fire-and-forget relative to this response, same reasoning as W1.6's Location-status-update branch: the caller doesn't need to block on N individual writes, and a partial failure there surfaces via this workflow's errorWorkflow alert, not a failed HTTP response."
+      "notes": "Responds as soon as the Campaign itself exists, not after every HopperEntry is created - the entry-creation loop (below) is fire-and-forget relative to this response, same reasoning as W1.6's Location-status-update branch: the caller doesn't need to block on N individual writes, and a partial failure there surfaces via this workflow's errorWorkflow alert, not a failed HTTP response. Field renamed from 'entriesQueued' to 'opportunityIdsRequested' this pass - now that a TCPA-consent check (below) can exclude some requested IDs from actually being queued, reporting a count synchronously here would either be wrong (claiming all were queued before the async consent checks even run) or require blocking on them, defeating the fire-and-forget design. The real queued count is only knowable by querying HopperEntries for this campaignId after the fact."
     },
     {
       "id": "de6c3eb0-3197-467d-bcd1-1aeccadc6541",
@@ -62,6 +62,48 @@
       "notes": "Splits the webhook payload's opportunityIds array into one item per Opportunity to queue. Reads directly off the trigger node's own output (no upstream transform needed) since Create Campaign's response doesn't carry this array."
     },
     {
+      "id": "699450c2-9c8f-46b6-a16e-9e51d87164dc",
+      "name": "Fetch Opportunity (TCPA check)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-80, -20],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $json.body.opportunityIds }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "05 Section 1: 'TCPA consent capture - recorded at entry; no consent = excluded from auto-dial.' Every Opportunity queued into an auto-dial campaign hopper gets checked here first - lead-intake-to-demo-dashboard.workflow.json (W1.1) is what actually records tcpaConsent, this is where the exclusion rule gets enforced."
+    },
+    {
+      "id": "6e56b5c2-cdaf-4bbf-a4c1-aecc5b2259f8",
+      "name": "Has TCPA consent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [80, -20],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.data || $json).tcpaConsent }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Fails closed: anything other than an explicit true (missing field, false, null) excludes the record - 'no consent = excluded,' not 'assume consent unless explicitly declined.' Excluded Opportunities are just never queued (no HopperEntry created) - a quiet skip by design, not an error, since 'this lead can't be auto-dialed yet' is an expected, common outcome, not a failure worth alerting on for every occurrence."
+    },
+    {
       "id": "e337add5-ab86-4e60-83c0-205621df3617",
       "name": "Create HopperEntry",
       "type": "n8n-nodes-base.httpRequest",
@@ -72,7 +114,7 @@
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ campaignId: $('Create Campaign').item.json.id, opportunityId: $json.body.opportunityIds, status: 'Available', attemptCountThisWave: 0, wave: 1 }) }}",
+        "jsonBody": "={{ JSON.stringify({ campaignId: $('Create Campaign').item.json.id, opportunityId: $('Split opportunityIds').item.json.body.opportunityIds, status: 'Available', attemptCountThisWave: 0, wave: 1 }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -97,7 +139,16 @@
       ]
     },
     "Split opportunityIds": {
-      "main": [[{ "node": "Create HopperEntry", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Fetch Opportunity (TCPA check)", "type": "main", "index": 0 }]]
+    },
+    "Fetch Opportunity (TCPA check)": {
+      "main": [[{ "node": "Has TCPA consent?", "type": "main", "index": 0 }]]
+    },
+    "Has TCPA consent?": {
+      "main": [
+        [{ "node": "Create HopperEntry", "type": "main", "index": 0 }],
+        []
+      ]
     }
   },
   "active": false,

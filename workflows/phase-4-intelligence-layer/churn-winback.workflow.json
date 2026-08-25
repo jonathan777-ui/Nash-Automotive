@@ -1,0 +1,146 @@
+{
+  "name": "Orbit AI - Phase 4 - Churn risk win-back (new, not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+      "name": "Every Monday at 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1400, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1" }]
+        }
+      },
+      "notes": "06's audit-gap list: 'churn/win-back.' No timing or trigger rule is given anywhere in the source docs for this one (unlike CX cadence's brief-given 7/30/60/90-day numbers) - weekly, not daily, is this pass's own judgment call: engagementScore (health-scoring.workflow.json, itself already a judgment-call formula) only recomputes once a day and moves slowly, so checking more often than weekly would mostly re-examine unchanged scores. Runs after health-scoring.workflow.json (6am daily) so today's score is always current by the time this reads it."
+    },
+    {
+      "id": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+      "name": "Fetch LiveClient Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same query cx-cadence.workflow.json and health-scoring.workflow.json both use - post-sale, Company not Opportunity, same load-bearing distinction every post-sale automation in this repo follows."
+    },
+    {
+      "id": "3d4e5f6a-7b8c-4d9e-af01-2b3c4d5e6f7a",
+      "name": "Decide at-risk clients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-920, 0],
+      "parameters": {
+        "jsCode": "// JUDGMENT-CALL THRESHOLD, not brief-specified - flagged prominently, see the trigger node's own\n// notes. engagementScore (health-scoring.workflow.json) maxes at 100 (40 tenure + 30 locations +\n// 30 tier); CHURN_RISK_THRESHOLD picks the bottom quarter as 'at risk' - a company that's both new\n// (low tenure) AND single-location AND Gold-tier would score right around here, so this also\n// catches legitimately-small-but-fine accounts, not just genuinely disengaged ones. That's a real\n// false-positive risk worth a human's second look, which is exactly why this workflow drafts and\n// alerts rather than acting - same reasoning as every other draft-and-approve workflow here.\nconst CHURN_RISK_THRESHOLD = 25;\n// Re-flag the same still-at-risk company at most once every COOLDOWN_DAYS - prevents a company that\n// stays low every single week from generating a fresh draft every single week forever.\nconst COOLDOWN_DAYS = 30;\nconst MS_PER_DAY = 86400000;\n\nfunction asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.companies)) return json.data.companies;\n  if (json && Array.isArray(json.companies)) return json.companies;\n  return [];\n}\n\nconst now = new Date();\nconst atRisk = [];\n\nfor (const company of $input.all().flatMap(asArray)) {\n  if (company.engagementScore == null || company.engagementScore >= CHURN_RISK_THRESHOLD) continue;\n  const lastSent = company.churnWinbackSentAt;\n  if (lastSent) {\n    const daysSince = (now - new Date(lastSent)) / MS_PER_DAY;\n    if (daysSince < COOLDOWN_DAYS) continue;\n  }\n  atRisk.push({ ...company, winbackAttempt: (company.churnWinbackAttemptCount || 0) + 1 });\n}\n\nreturn atRisk.map((c) => ({ json: c }));"
+      }
+    },
+    {
+      "id": "4e5f6a7b-8c9d-4eaf-b012-3c4d5e6f7a8b",
+      "name": "Draft win-back message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 512, system: [{ type: 'text', text: 'You draft short, warm retention/win-back check-ins for an existing client whose engagement appears to have dropped. Never mention a numeric score or that they were flagged by an algorithm - frame it as a genuine account-rep check-in (\\'wanted to see how things are going\\', ask what could be better, offer to hop on a call). No guilt, no pressure, no hint that the relationship is at risk. DRAFT ONLY for the account rep to review before sending - never implies it has been sent.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Company: ' + $json.name + '\\nClient since: ' + $json.liveClientSince + '\\nWin-back attempt: ' + $json.winbackAttempt + '\\nDraft a retention check-in.' }] }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "headers": {
+            "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Claude API"
+        }
+      },
+      "notes": "Draft only - a churn win-back touch is an external send like every nurture/CX draft in this repo, human approves/sends, same automation risk boundary. The system prompt explicitly forbids exposing the score/algorithm to the client - the client should experience this as a person checking in, not a system flagging them."
+    },
+    {
+      "id": "5f6a7b8c-9dae-4fb0-9123-4d5e6f7a8b9c",
+      "name": "Extract draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-440, 0],
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst textBlock = (body.content || []).find((b) => b.type === 'text');\nif (!textBlock) throw new Error('Claude response had no text content block.');\nreturn [{ json: { draftText: textBlock.text } }];"
+      }
+    },
+    {
+      "id": "6a7b8c9d-eafb-4012-a234-5e6f7a8b9c0d",
+      "name": "Update Company churn state",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies/{{ $('Decide at-risk clients').item.json.id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ churnWinbackSentAt: new Date().toISOString(), churnWinbackAttemptCount: $('Decide at-risk clients').item.json.winbackAttempt, churnWinbackDraftText: $json.draftText }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Advances regardless of whether the rep actually sends the draft, same reasoning as nurture-cadence.workflow.json and cx-cadence.workflow.json's own state-write nodes - churnWinbackSentAt being set is what starts this company's COOLDOWN_DAYS window, not the rep's send action, since this workflow has no way to observe whether a send actually happened."
+    },
+    {
+      "id": "7b8c9dae-fb01-4234-b345-6f7a8b9c0d1e",
+      "name": "Alert: churn risk win-back ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'churn-winback', message: $('Decide at-risk clients').item.json.name + ' is showing low engagement (score ' + $('Decide at-risk clients').item.json.engagementScore + ') - win-back draft ready (attempt ' + $('Decide at-risk clients').item.json.winbackAttempt + ').', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/company/' + $('Decide at-risk clients').item.json.id }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #cx-retention (alertRouting.ts's cx-retention route already matches 'churn'). severity:'warning', not 'info' like the routine nurture/CX drafts - a client trending toward churn deserves more visibility than a routine scheduled touch."
+    }
+  ],
+  "connections": {
+    "Every Monday at 7am": {
+      "main": [[{ "node": "Fetch LiveClient Companies", "type": "main", "index": 0 }]]
+    },
+    "Fetch LiveClient Companies": {
+      "main": [[{ "node": "Decide at-risk clients", "type": "main", "index": 0 }]]
+    },
+    "Decide at-risk clients": {
+      "main": [[{ "node": "Draft win-back message", "type": "main", "index": 0 }]]
+    },
+    "Draft win-back message": {
+      "main": [[{ "node": "Extract draft", "type": "main", "index": 0 }]]
+    },
+    "Extract draft": {
+      "main": [[{ "node": "Update Company churn state", "type": "main", "index": 0 }]]
+    },
+    "Update Company churn state": {
+      "main": [[{ "node": "Alert: churn risk win-back ready", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

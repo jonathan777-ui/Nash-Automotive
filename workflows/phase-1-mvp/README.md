@@ -39,6 +39,31 @@ All three share the same `revenueCents: 0`-on-creation simplification W1.6 alrea
 linkage needs a recurring-charge Stripe webhook this repo doesn't wire up anywhere (only the initial
 Checkout Session is handled) — flagged consistently, not solved three different ways.
 
+## New this pass — audit gaps closed (`06`'s audit-gap list, not brief-W-numbered)
+
+- **TCPA consent capture** — `lead-intake-to-demo-dashboard.workflow.json` (W1.1) now normalizes and
+  writes a strict-boolean `tcpaConsent` field onto the Opportunity at intake. Enforced downstream by
+  `phase-3-dialer-hopper/hopper-load-campaign.workflow.json`, not here — this workflow only records
+  the fact; the dialer hopper is what actually excludes non-consenting leads from auto-dial.
+- **`proposal-viewed.workflow.json`** — a webhook (`portal/public/proposal.html`'s fire-and-forget
+  beacon, wired via `portal/netlify/functions/proposal-viewed.mts`) recording the first time a lead
+  actually opens their Proposal page (`proposalViewedAt`, first-view-wins). Exists to give portal
+  abandonment (below) a real "was this actually opened" signal instead of guessing from stage alone.
+- **`portal-abandonment-followup.workflow.json`** — every 6 hours, finds `DemoCompleted`-stage
+  Opportunities that were viewed (`proposalViewedAt` set) 48+ hours ago (judgment-call window, see the
+  workflow's own trigger notes) and never followed up, drafts a gentle nudge via Claude (draft-only,
+  human sends), and alerts `#portal-conversion`. Single-shot per Opportunity, not a repeating cadence.
+- **`refund-request.workflow.json`** — a pure gate, not a processor: logs a refund request to a Twenty
+  CRM Activity Event, notifies a named accounting recipient, and alerts `#accounting`. Never calls
+  Stripe's refund API and never writes a "refunded" state anywhere — a human always processes the
+  actual refund. Deliberately not built on Command Center's `ai_action_requests` table (that queue is
+  specifically for AI-employee actions awaiting approval; a refund request was never an AI action).
+- **Failed/declined payment dunning** — see W1.6's own section below.
+
+`churn-winback.workflow.json` (the last audit-gap item, client health scoring's own consumer) lives in
+`phase-4-intelligence-layer/`, documented in that phase's README instead — it depends on
+`health-scoring.workflow.json`'s `engagementScore`, which is a Phase 4 output.
+
 ## W1.1 — `lead-intake-to-demo-dashboard.workflow.json`
 
 Webhook (lead intake) → normalize the payload → **resolve or create a Location** (GBP/website-keyed
@@ -164,6 +189,17 @@ What changed:
 - Tier is now reverse-derived from the paid amount against the brief's own known tier prices, since
   the portal doesn't currently pass a `tier` field in Stripe metadata (only `opportunityId`) —
   avoided a second coordinated change to `portal/` for this.
+- **Failed/declined payment now has a distinct path (this pass, `06`'s audit-gap list: "failed/
+  declined payment handling — retry/dunning, distinct CRM state").** The signature/classification
+  node now recognizes `payment_intent.payment_failed`/`checkout.session.expired` alongside the
+  existing success types, and a new **`Payment succeeded?`** IF node (right after `Relevant event
+  type?`) splits the two: a real success continues into the Won/Contract path unchanged; a failure
+  branches into `Fetch Opportunity (dunning)` → `Write dunning state` (writes `paymentStatus:
+  'Failed'`, increments `dunningAttemptCount`, records `lastPaymentFailureReason` from Stripe's own
+  `last_payment_error.message`) → `Alert: payment failed` (routes to `#portal-conversion` —
+  `alertRouting.ts` matches `'stripe-payment'`) → a distinct `Respond: handled (dunning)`. No retry is
+  triggered automatically anywhere in this path — retrying a charge is a billing action, gated to a
+  human, same as every other billing/contract decision in this repo.
 
 **Still true from before:** assumes the Checkout Session/PaymentIntent was created with
 `metadata.opportunityId` set — `portal/netlify/functions/create-checkout-session.mts` does this

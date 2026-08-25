@@ -21,6 +21,7 @@ describe('channelForSource', () => {
     ['missed-follow-up-detector', 'missed-follow-ups'],
     ['contract-amendment-flow', 'accounting'],
     ['billing-period-rollover', 'accounting'],
+    ['refund-request', 'accounting'],
     ['ai-activity-summary', 'ai-agents'],
   ])('routes source %s to #%s', (source, expected) => {
     expect(channelForSource(source)).toBe(expected);

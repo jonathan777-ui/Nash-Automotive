@@ -34,12 +34,13 @@
             { "id": "n7", "name": "niche", "value": "={{ $json.body.niche }}", "type": "string" },
             { "id": "n8", "name": "websiteUrl", "value": "={{ $json.body.websiteUrl }}", "type": "string" },
             { "id": "n9", "name": "gbpUrl", "value": "={{ $json.body.gbpUrl }}", "type": "string" },
-            { "id": "n10", "name": "opportunityId", "value": "={{ $json.body.opportunityId }}", "type": "string" }
+            { "id": "n10", "name": "opportunityId", "value": "={{ $json.body.opportunityId }}", "type": "string" },
+            { "id": "n11", "name": "tcpaConsent", "value": "={{ $json.body.tcpaConsent === true }}", "type": "boolean" }
           ]
         },
         "options": {}
       },
-      "notes": "UNCONFIRMED field shape - assumes the lead-intake caller posts these exact field names. Per CRM-OBJECT-MODEL.md (object model migration): gbpUrl added as its own field, separate from websiteUrl - Location is explicitly GBP-driven, so it's the primary key used to search/create the Location record, with websiteUrl as a fallback. Still assumes the Opportunity itself already exists (opportunityId supplied) - this workflow resolves/creates its Location, not the Opportunity."
+      "notes": "UNCONFIRMED field shape - assumes the lead-intake caller posts these exact field names. Per CRM-OBJECT-MODEL.md (object model migration): gbpUrl added as its own field, separate from websiteUrl - Location is explicitly GBP-driven, so it's the primary key used to search/create the Location record, with websiteUrl as a fallback. Still assumes the Opportunity itself already exists (opportunityId supplied) - this workflow resolves/creates its Location, not the Opportunity. tcpaConsent is new this pass (05 Section 1: 'TCPA consent capture - recorded at entry; no consent = excluded from auto-dial') - coerced to a real boolean (`=== true`) rather than trusting whatever truthy/falsy value the caller sends, so a missing or malformed field defaults to false (no consent), never silently true."
     },
     {
       "id": "fc954e30-e230-42c2-9371-57174d7b4aeb",
@@ -214,7 +215,7 @@
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Normalize lead fields').item.json.opportunityId }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ stage: 'Demo Queue', dueDiligenceStatus: 'Complete', dueDiligenceReportUrl: $('Deep Dive Research').item.json.reportUrl, locationIds: [$('Location resolved').item.json.locationId] }) }}",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Demo Queue', dueDiligenceStatus: 'Complete', dueDiligenceReportUrl: $('Deep Dive Research').item.json.reportUrl, locationIds: [$('Location resolved').item.json.locationId], tcpaConsent: $('Normalize lead fields').item.json.tcpaConsent }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },

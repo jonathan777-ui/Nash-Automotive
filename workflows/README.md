@@ -48,7 +48,7 @@ possible. Each catalog entry below states which side of that line it's on.
 
 **W0.1 — Nightly backup.** `pg_dump` on every Postgres DB (scraper, n8n's own DB if Postgres-backed,
 Twenty CRM if/when self-hosted) + an n8n workflow-JSON export, both pushed to the Cloudflare R2
-bucket `orbit-backups` (already live). Fails loudly (Slack/alert) rather than silently on any step.
+bucket `orbit-backups` (already live). Fails loudly (Google Chat/alert) rather than silently on any step.
 See `phase-0-infrastructure/README.md`.
 
 ---
@@ -98,7 +98,7 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.1 | Unified calendar write-through | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | Documented only |
 | W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | Documented only |
 | W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Stage = Live Client + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | Documented only |
-| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Real gap found while building it: neither Slack nor an SMS provider is in `02 - Launch Checklist` — see that folder's README. |
+| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat (per Jonathan's request, swapped from an earlier Slack version) + SMS on critical; SMS still has no vendor in `02 - Launch Checklist` — see that folder's README. |
 | W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
 
@@ -107,12 +107,13 @@ Human-Scheduled tagging convention decided against a real Google Calendar setup;
 nurture/CX message *content* decided (the brief resolves the CX cadence's timing — 7/30/60/90-day
 then quarterly — but not what each touch says).
 
-**W2.4 — scaffolded this pass.** The dispatch mechanism itself (receive an alert, route to Slack
-and/or SMS by severity) didn't need the undecided thresholds resolved first — only *what triggers*
-an alert ("high-value lead," what counts as "overdue") is still undecided, and any future workflow
-that decides those can just call the dispatcher that already exists. See
-`phase-2-calendar-nurture-alerts/README.md` for a real gap found while building it: neither Slack
-nor an SMS provider is in `02 - Launch Checklist` at all.
+**W2.4 — scaffolded this pass.** The dispatch mechanism itself (receive an alert, route to Google
+Chat and/or SMS by severity) didn't need the undecided thresholds resolved first — only *what
+triggers* an alert ("high-value lead," what counts as "overdue") is still undecided, and any future
+workflow that decides those can just call the dispatcher that already exists. Routes to Google Chat
+rather than Slack (swapped per Jonathan's request — the brief's own "Slack/SMS" phrasing predates
+that). See `phase-2-calendar-nurture-alerts/README.md`: SMS still has no vendor anywhere in
+`02 - Launch Checklist`.
 
 **W2.5 (new, from CRM Architecture §13)** — "Communications Hub — custom object covering Calls/SMS/
 Social/Other, polymorphic to Person + Company + Opportunity — every touchpoint in one place
@@ -255,7 +256,9 @@ standing rule for anything written in this library from now on:
 New in brief v2, explicitly scoped as part of Command Center **Piece 2** (channel-based chat,
 @mentions, in-app delivery of the same alerts as W2.4, comment threads attached to CRM records) —
 "not a Slack replacement... separate, for team-to-team communication that lives inside the same tool
-as everything else." External Slack (W2.4) keeps receiving system alerts regardless.
+as everything else" (the brief's own words, written before the switch to Google Chat below). The
+external channel W2.4 dispatches system alerts to — Google Chat, per Jonathan's request — keeps
+receiving them regardless; this is a distinct, in-app surface on top.
 
 **Not a Phase 1 blocker and not scaffolded** — the brief itself sequences this after Piece 1 (the
 wizard) ships, same as pipeline reporting (W6.1, also folded into Piece 2). Noted here so it isn't
@@ -275,10 +278,13 @@ v2 moved Documenso out of the Phase 1 credential set entirely (see `phase-1-mvp/
 workflow needs a credential with no Secrets Store entry yet (e.g. the Places API key — see
 `src/server/README.md`), that's flagged the same way there.
 
-**Two more such gaps, found while building Phase 2's alert dispatcher:** `SLACK_WEBHOOK_URL` and
-`SMS_PROVIDER_URL` are referenced by `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`
-but neither Slack nor an SMS provider appears in `02 - Launch Checklist` at all — not even as a
-deferred item. Worth resolving before that workflow matters for real; see that folder's README.
+**Two more such gaps, found while building Phase 2's alert dispatcher:** `GOOGLE_CHAT_WEBHOOK_URL`
+and `SMS_PROVIDER_URL` are referenced by
+`phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`, and neither is a Secrets Store
+entry in `command-center/src/vendors.ts` (a Google Chat webhook URL isn't really a vendor
+*credential* the way an API key is — same treatment as `N8N_INSTANCE_URL`). SMS remains the bigger
+open item: no provider appears anywhere in `02 - Launch Checklist` at all, not even as a deferred
+item. Worth resolving before that workflow matters for real; see that folder's README.
 
 ## How this library relates to the rest of the repo
 

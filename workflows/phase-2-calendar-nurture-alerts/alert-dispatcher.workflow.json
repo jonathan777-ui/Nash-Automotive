@@ -14,7 +14,7 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "notes": "Generic, reusable sub-workflow: every other workflow in this library that needs to raise an internal alert (W1.1/W1.2's generation-failure alert, W0.1/every workflow's errorWorkflow setting) should call THIS webhook rather than hitting Slack/SMS directly - one place to change delivery logic. Body contract: {severity: 'info'|'warning'|'critical', source: string (which workflow/step raised it), message: string}. Not itself blocked on an undecided threshold - W2.4's 'documented only' status in the previous version of this catalog was about WHAT triggers an alert (thresholds like 'high-value lead', 'overdue'), not the dispatch mechanism itself, which needed no such decision."
+      "notes": "Generic, reusable sub-workflow: every other workflow in this library that needs to raise an internal alert (W1.1/W1.2's generation-failure alert, W0.1/every workflow's errorWorkflow setting) should call THIS webhook rather than hitting Google Chat/SMS directly - one place to change delivery logic. Body contract: {severity: 'info'|'warning'|'critical', source: string (which workflow/step raised it), message: string}. Not itself blocked on an undecided threshold - W2.4's 'documented only' status in the previous version of this catalog was about WHAT triggers an alert (thresholds like 'high-value lead', 'overdue'), not the dispatch mechanism itself, which needed no such decision."
     },
     {
       "id": "7183e257-5eb4-4c72-a602-aa3693127e7d",
@@ -37,23 +37,23 @@
         },
         "options": {}
       },
-      "notes": "ASSUMED routing rule, not specified by the brief: 'critical' goes to Slack AND SMS, 'warning'/'info' go to Slack only. Reasonable default (SMS for urgent-enough-to-interrupt, Slack for everything worth a record), but worth confirming - the brief just says 'Slack/SMS via n8n' without a routing rule between them."
+      "notes": "ASSUMED routing rule, not specified by the brief: 'critical' goes to Google Chat AND SMS, 'warning'/'info' go to Google Chat only. Reasonable default (SMS for urgent-enough-to-interrupt, Google Chat for everything worth a record), but worth confirming - the brief just says 'Slack/SMS via n8n' (written before the switch to Google Chat) without a routing rule between the two channels either way."
     },
     {
       "id": "03271bd7-d9d6-4bd8-a0fd-1c4a2c16ef9b",
-      "name": "Send to Slack",
+      "name": "Send to Google Chat",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [-100, -80],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.SLACK_WEBHOOK_URL || 'PLACEHOLDER_SLACK_WEBHOOK_URL' }}",
+        "url": "={{ $env.GOOGLE_CHAT_WEBHOOK_URL || 'PLACEHOLDER_GOOGLE_CHAT_WEBHOOK_URL' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message }) }}",
         "options": {}
       },
-      "notes": "GAP WORTH FLAGGING DIRECTLY, not just in this comment: Slack isn't in 02 - Launch Checklist's account list at all - the brief assumes a Slack workspace/incoming-webhook exists without listing it as something to create or gather a credential for. Either it's assumed already in place from other Orbit AI ops, or this is a genuine gap in the checklist worth asking about before go-live."
+      "notes": "Switched from Slack per Jonathan's request. Google Chat's incoming-webhook API takes the same minimal shape as Slack's ({text: string} POSTed as JSON) - no structural change needed, just the target URL. GOOGLE_CHAT_WEBHOOK_URL is the full webhook URL a Google Chat space's 'Apps & integrations -> Webhooks' screen generates (already includes its own key/token query params - paste the whole URL, not just a base). Smaller gap than the Slack version was: Google Chat rides on the same Google Workspace domain already assumed elsewhere in this system (Drive API in 02 - Launch Checklist, and the Command Center's Cloudflare Access policy is 'anyone on the @orbitaiautomation.com Workspace domain') - still not literally listed as its own checklist line item, but far more likely to already exist than a standalone Slack workspace would."
     },
     {
       "id": "c7ae99f2-c723-4446-83b0-25f63c19f728",
@@ -69,7 +69,7 @@
         "jsonBody": "={{ JSON.stringify({ to: $env.ALERT_SMS_TO || 'PLACEHOLDER_ALERT_SMS_TO', body: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message }) }}",
         "options": {}
       },
-      "notes": "SAME GAP AS SLACK, more so: no SMS provider (Twilio or otherwise) appears ANYWHERE in 02 - Launch Checklist - not even as a deferred/later item the way Telnyx and Documenso are. If SMS alerts are actually wanted for go-live, a provider account needs adding to the credential set; until then this stays a named placeholder with no real vendor decided, not just no key yet."
+      "notes": "Still a real gap, unlike Google Chat: no SMS provider (Twilio or otherwise) appears ANYWHERE in 02 - Launch Checklist - not even as a deferred/later item the way Telnyx and Documenso are. If SMS alerts are actually wanted for go-live, a provider account needs adding to the credential set; until then this stays a named placeholder with no real vendor decided, not just no key yet."
     }
   ],
   "connections": {
@@ -79,10 +79,10 @@
     "Critical?": {
       "main": [
         [
-          { "node": "Send to Slack", "type": "main", "index": 0 },
+          { "node": "Send to Google Chat", "type": "main", "index": 0 },
           { "node": "Send SMS (critical only)", "type": "main", "index": 0 }
         ],
-        [{ "node": "Send to Slack", "type": "main", "index": 0 }]
+        [{ "node": "Send to Google Chat", "type": "main", "index": 0 }]
       ]
     }
   },

@@ -9,16 +9,21 @@ catalog.
 
 A generic, reusable sub-workflow: anything else in this library that needs to raise an internal
 alert calls its webhook (`POST /webhook/alert-dispatch`, body `{severity, source, message}`) rather
-than hitting Slack/SMS directly. `demo-generation-trigger.workflow.json` (W1.2) already calls it —
-it used to POST to a bare placeholder URL before this existed.
+than hitting Google Chat/SMS directly. `demo-generation-trigger.workflow.json` (W1.2) already calls
+it — it used to POST to a bare placeholder URL before this existed.
 
-**Real gap worth flagging directly, not just in a code comment:** neither Slack nor an SMS provider
-appears anywhere in `02 - Launch Checklist`. The brief mentions "Slack/SMS via n8n" as the alert
-channels but never lists an account to create for either — Slack might already exist from other
-Orbit AI operations (plausible, common for a solo/small team), but SMS has no vendor named at all,
-not even as a deferred item the way Telnyx and Documenso are. Worth a direct answer before this
-matters for real: is there an existing Slack workspace/webhook to point `SLACK_WEBHOOK_URL` at, and
-is SMS alerting actually wanted (if so, which provider — Twilio is the common default)?
+**Routes to Google Chat, not Slack** — swapped per Jonathan's request; the brief's own "Slack/SMS via
+n8n" phrasing predates that. Point `GOOGLE_CHAT_WEBHOOK_URL` at a Google Chat space's webhook URL
+(space → Apps & integrations → Webhooks → create one, paste the full generated URL including its
+key/token query params). Since this system already assumes a Google Workspace domain elsewhere
+(Drive API in `02 - Launch Checklist`, and the Command Center's Cloudflare Access policy is "anyone
+on the @orbitaiautomation.com Workspace domain"), this is a much smaller gap than the Slack version
+was — a Chat space is a few clicks inside a Workspace that already exists, not a separate service to
+stand up.
+
+**SMS remains a real, unresolved gap:** no provider (Twilio or otherwise) appears anywhere in
+`02 - Launch Checklist`, not even as a deferred item the way Telnyx and Documenso are. Worth a direct
+answer before this matters for real: is SMS alerting actually wanted, and if so, which provider?
 
 **Once imported into a real n8n instance:** note this workflow's assigned ID and update every other
 workflow's `settings.errorWorkflow` field (currently `PLACEHOLDER_ALERT_WORKFLOW_ID` throughout this

@@ -86,7 +86,7 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
 
 - Piece 2 (the rest of the Command Center — pipeline visibility/reporting, system health, and, per
   brief v2's new `05 - Exhaustive Workflow & Automation Library` §14, **Internal Team Messaging**:
-  channel-based chat, @mentions, in-app delivery of the same alerts Section 11 sends to Slack, and
+  channel-based chat, @mentions, in-app delivery of the same alerts Section 11 sends to Google Chat, and
   comment threads attached directly to CRM records) — lower priority, grows incrementally after the
   wizard ships; not started. See `workflows/README.md`'s "Internal Team Messaging" section for the
   full brief-v2 detail.

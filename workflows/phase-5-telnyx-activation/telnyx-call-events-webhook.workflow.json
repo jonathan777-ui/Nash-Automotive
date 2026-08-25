@@ -1,0 +1,328 @@
+{
+  "name": "Orbit AI - Phase 5 - Telnyx call events webhook (W5.2, AMD + disclosure + bridge)",
+  "nodes": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Telnyx call events webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-2000, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telnyx-call-events",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "webhook_url passed on both legs dialer-place-call.workflow.json places (POST /v2/calls). onReceived, not responseNode - Telnyx only needs a fast 200 ack, same as Stripe's own webhook, and doesn't read anything from the response body. Handles PREVIEW-MODE, SINGLE-LINE calls only (one customer leg + one agent leg per HopperEntry, dialed together and bridged once AMD confirms a human) - real Power/3-Line dialing (opening several simultaneous customer legs per agent and racing them, dropping ones that don't connect before an agent is free) needs a call ORCHESTRATOR tracking N in-flight legs per rep and deciding which to bridge/drop, which is a materially different architecture this workflow doesn't build. Flagged, not silently narrowed - same 'name what's not solved' treatment as Front Door Audit's unscored categories."
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Decode event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1760, 0],
+      "parameters": {
+        "jsCode": "// Telnyx's documented Call Control webhook envelope: {data: {event_type, id, payload: {...}}}.\n// UNVERIFIED against a live account, same caveat as every Telnyx/Stripe integration point in this\n// repo - confirm this shape (and specifically whether client_state comes back already base64-\n// decoded or still encoded) once real credentials/traffic exist.\nconst body = $input.first().json.body || {};\nconst data = body.data || {};\nconst payload = data.payload || {};\n\nlet decodedState = {};\ntry {\n  const raw = payload.client_state ? Buffer.from(payload.client_state, 'base64').toString('utf8') : '{}';\n  decodedState = JSON.parse(raw);\n} catch (e) {\n  decodedState = {}; // malformed/missing client_state - treated as an unknown leg below, not thrown\n}\n\nreturn [{\n  json: {\n    eventType: data.event_type,\n    callControlId: payload.call_control_id,\n    role: decodedState.role || null,\n    hopperEntryId: decodedState.hopperEntryId || null,\n    opportunityId: decodedState.opportunityId || null,\n    repId: decodedState.repId || null,\n    amdResult: payload.result || null,\n    hangupCause: payload.hangup_cause || null,\n    recordingUrls: payload.recording_urls || payload.recording_url || null,\n  },\n}];"
+      }
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000003",
+      "name": "Customer leg answered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1520, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.eventType }}", "rightValue": "call.answered", "operator": { "type": "string", "operation": "equals" } },
+            { "id": "c2", "leftValue": "={{ $json.role }}", "rightValue": "customer", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000004",
+      "name": "Speak disclosure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1280, -280],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $json.callControlId }}/actions/speak",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ payload: 'This call may be recorded for quality and training purposes.', voice: 'female', language: 'en-US' }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "06's deferred 'call recording disclosure' audit gap, closed here - spoken BEFORE recording starts (see 'Start recording' below, gated on this action's own call.speak.ended event), so disclosure genuinely precedes recording rather than racing it. Fires on every answered customer leg regardless of what answers (human or machine) - a disclosure heard by voicemail is harmless, and AMD hasn't resolved yet at the moment the leg answers, so gating disclosure on AMD result first isn't possible even if it were desirable. Exact wording is this pass's own reasonable default, not brief-specified or counsel-reviewed - flag for legal/compliance sign-off before this goes live, same treatment as the compliant-hours 8am-9pm federal floor elsewhere in this repo."
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000005",
+      "name": "Speak ended?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1520, 140],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.eventType }}", "rightValue": "call.speak.ended", "operator": { "type": "string", "operation": "equals" } },
+            { "id": "c2", "leftValue": "={{ $json.role }}", "rightValue": "customer", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000006",
+      "name": "Start recording",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1280, 140],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $json.callControlId }}/actions/record_start",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ format: 'mp3', channels: 'dual' }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "Only reached after the disclosure has actually finished being spoken (this node's trigger is call.speak.ended, not call.answered) - the compliant ordering the disclosure gap required: disclosed, then recorded, never the reverse."
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000007",
+      "name": "AMD resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1520, 320],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.eventType }}", "rightValue": "call.machine.detection.ended", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000008",
+      "name": "Fetch HopperEntry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1280, 320],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $json.hopperEntryId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Needs telnyxAgentCallControlId (to bridge to) and campaignId (to feed pacing-controller.workflow.json) - both live on the HopperEntry, correlated here via the hopperEntryId decoded out of this event's client_state."
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000009",
+      "name": "AMD result human?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1040, 320],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $('Decode event').item.json.amdResult }}", "rightValue": "human", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Telnyx's documented AMD result values: 'human' / 'machine' / 'not_sure' / 'failure'. Only 'human' bridges to the agent - the other three are treated the same (no live connection worth an agent's time), matching pacing-controller.workflow.json's own 'Other isn't pacing-relevant' framing rather than inventing a fourth pacing bucket."
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000a",
+      "name": "Bridge to agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-800, 240],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Decode event').item.json.callControlId }}/actions/bridge",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ call_control_id: ($json.data || $json).telnyxAgentCallControlId }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "Connects the two legs (customer + the rep's own already-dialed SIP extension leg, dialer-place-call.workflow.json) into one conversation - Telnyx's bridge action joins two existing call control IDs, it doesn't dial a new destination. A live human connection, single line only (Preview-mode) - no line-opening/abandonment risk exists in this exact flow, since only one customer line was ever open per agent. FLAGGED ORDERING ASSUMPTION: assumes the agent leg has already answered (the rep's softphone/SIP client picks up quickly) by the time the customer leg's AMD result comes back - if AMD resolves before the agent leg answers, Telnyx's bridge action against a not-yet-answered call control ID may reject or no-op. Not handled with a wait/retry here; worth hardening once real call-timing data exists from a live account."
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000b",
+      "name": "Pacing: Connected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-560, 240],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/pacing-controller",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ campaignId: ($('Fetch HopperEntry').item.json.data || $('Fetch HopperEntry').item.json).campaignId, callOutcome: 'Connected' }) }}",
+        "options": {}
+      },
+      "notes": "The real caller pacing-controller.workflow.json (W3.5) has been waiting on since it was built - 'needs the live-dial engine... to actually tag call outcomes as Connected/Abandoned.' This IS that tag, for real, for the first time. 'Abandoned' is never produced by this Preview-mode-only flow (see this workflow's own webhook-node notes on why) - only Power/3-Line dialing could genuinely produce it."
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000c",
+      "name": "Hang up (no human)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-800, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Decode event').item.json.callControlId }}/actions/hangup",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "AMD said machine/not_sure/failure - hangs up the customer leg. No voicemail drop is left (a recorded voicemail message is itself an external send/compliance question the brief doesn't specify - same 'flagged, not guessed' treatment as everything else undecided here). The agent leg is left for the rep's dialer UI to hang up or route to the next call - not this workflow's job once there's no live connection to bridge it to."
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000d",
+      "name": "Pacing: Other (machine/no answer)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-560, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/pacing-controller",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ campaignId: ($('Fetch HopperEntry').item.json.data || $('Fetch HopperEntry').item.json).campaignId, callOutcome: 'Other' }) }}",
+        "options": {}
+      },
+      "notes": "Per pacing-controller.workflow.json's own docs: 'Other isn't pacing-relevant and is a no-op' - still called for completeness/consistency (every real call outcome reports in), not because this branch expects it to move the abandonment rate."
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000e",
+      "name": "Recording saved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1520, 500],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.eventType }}", "rightValue": "call.recording.saved", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10000000-0000-4000-8000-00000000000f",
+      "name": "Write recording URL to HopperEntry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1280, 500],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $json.hopperEntryId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ telnyxRecordingUrl: Array.isArray($json.recordingUrls) ? $json.recordingUrls[0] : $json.recordingUrls }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Telnyx's call.recording.saved payload shape (single recording_url string vs. a recording_urls array of format variants) isn't confirmed from this sandbox - handles both. Does NOT auto-trigger post-call-synthesis.workflow.json (W3.4) - that needs a transcript, and this event doesn't carry one (Telnyx's real-time transcription, if enabled, is a separate call.transcription event this workflow doesn't subscribe to). W3.4 stays triggered the way call-wrap-up.workflow.json (W3.6) already does it: fire-and-forget, only when a transcript was actually supplied."
+    }
+  ],
+  "connections": {
+    "Telnyx call events webhook": {
+      "main": [[{ "node": "Decode event", "type": "main", "index": 0 }]]
+    },
+    "Decode event": {
+      "main": [[{ "node": "Customer leg answered?", "type": "main", "index": 0 }]]
+    },
+    "Customer leg answered?": {
+      "main": [
+        [{ "node": "Speak disclosure", "type": "main", "index": 0 }],
+        [{ "node": "Speak ended?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Speak ended?": {
+      "main": [
+        [{ "node": "Start recording", "type": "main", "index": 0 }],
+        [{ "node": "AMD resolved?", "type": "main", "index": 0 }]
+      ]
+    },
+    "AMD resolved?": {
+      "main": [
+        [{ "node": "Fetch HopperEntry", "type": "main", "index": 0 }],
+        [{ "node": "Recording saved?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch HopperEntry": {
+      "main": [[{ "node": "AMD result human?", "type": "main", "index": 0 }]]
+    },
+    "AMD result human?": {
+      "main": [
+        [{ "node": "Bridge to agent", "type": "main", "index": 0 }],
+        [{ "node": "Hang up (no human)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Bridge to agent": {
+      "main": [[{ "node": "Pacing: Connected", "type": "main", "index": 0 }]]
+    },
+    "Hang up (no human)": {
+      "main": [[{ "node": "Pacing: Other (machine/no answer)", "type": "main", "index": 0 }]]
+    },
+    "Recording saved?": {
+      "main": [
+        [{ "node": "Write recording URL to HopperEntry", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

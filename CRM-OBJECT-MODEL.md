@@ -195,7 +195,12 @@ may hold Locations under completely different Contracts.
   `frontDoorAuditStatus`, `frontDoorAuditScore`, `frontDoorAuditReportUrl`,
   `frontDoorAuditRefreshedAt` (nullable — new this pass, set only by
   `front-door-audit-refresh.workflow.json`'s periodic re-check, distinguishing it from the
-  original lead-intake audit), `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`.
+  original lead-intake audit), `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`,
+  `demoExtension` (integer, nullable, new this pass — Phase 5/W5.3's "demo extension
+  auto-assignment," a global sequential counter starting at 1000, allocated by
+  `demo-extension-auto-assign.workflow.json` via Command Center's `allocateDemoExtension`
+  compare-and-swap loop the moment a demo finishes generating; lets a prospect call a shared Telnyx
+  number and dial their own extension to hear their specific AI receptionist demo).
 - Assumed REST: `GET/POST/PATCH /rest/locations`, `/rest/locations/{id}`.
 - **Location Contract Lock**: `contractStatus` is the field every lock check reads. A NEW
   Contract-generation attempt on a Location that's already `ActiveM2M`/`ActiveTerm` from an
@@ -364,7 +369,12 @@ queue. This is where the shared-pool-vs-personal-hold distinction actually lives
   `firstAttemptDateThisWave` (new this pass — when the current wave's attempt clock started, used to
   check the wave's day-window), `attemptCountToday` (new this pass — resets whenever `lastAttemptDate`
   isn't today, enforces the daily attempt cap), `nextEligibleAt` (when a recycled entry re-enters the
-  pool, or a Callback's rep-selected due time).
+  pool, or a Callback's rep-selected due time), `telnyxCustomerCallControlId`/`telnyxAgentCallControlId`
+  (new this pass, Phase 5 — `dialer-place-call.workflow.json` writes both Telnyx Call Control IDs
+  here at call-placement time; `telnyx-call-events-webhook.workflow.json` reads them back to know
+  which agent leg to bridge a connected customer leg to, correlated via `client_state` rather than a
+  second lookup table), `telnyxRecordingUrl` (nullable, new this pass — set once Telnyx's
+  `call.recording.saved` event fires).
 - Assumed REST: `/rest/hopperEntries`, `/rest/hopperEntries/{id}`.
 - **The Callback vs. Try-back distinction, locked:**
   - **Callback** (a lead asked for a specific personal follow-up) → `status: 'CallbackLocked'`,

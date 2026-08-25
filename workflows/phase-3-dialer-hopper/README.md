@@ -51,12 +51,14 @@ target, capped at `maxSimultaneousCallsPerAgentCeiling` — the one value a huma
 sets, once per Campaign, before it runs. Errs toward compliance safety over throughput on purpose:
 throttles down on any breach, ramps up conservatively.
 
-**Not wired to anything live yet**, same status W3.3/W3.4 had before W3.1/W3.2 existed: it needs the
-live-dial engine (Phase 5, Telnyx-gated, not built) to actually tag call outcomes as `Connected`/
-`Abandoned` (specifically, "connected but no agent greeted within the compliance threshold" is a
-live-dialer concept this repo's disposition schema doesn't produce) and to read
-`currentAllowedSimultaneousCallsPerAgent` back off the Campaign before opening lines. The decision
-and persistence logic itself is real and ready.
+**Now wired to something live, this pass:** `phase-5-telnyx-activation/telnyx-call-events-webhook.workflow.json`
+is the live-dial engine this workflow was waiting on — it reports `Connected`/`Other` on every real
+call outcome (AMD `human` → bridge → `Connected`; anything else → hang up → `Other`). **`Abandoned`
+is still never produced** — that's specifically "connected but no agent greeted within the compliance
+threshold," a Power/3-Line (multi-simultaneous-line) concept the Phase 5 build deliberately doesn't
+implement (Preview-mode, single-line only — see `phase-5-telnyx-activation/README.md`). Reading
+`currentAllowedSimultaneousCallsPerAgent` back off the Campaign before opening lines is therefore
+still not wired either — there's only ever one line to open in the flow that exists today.
 
 ## W3.2 — `hopper-load-campaign.workflow.json`
 
@@ -173,10 +175,11 @@ AI guess, the thing this workflow acts on.
 ## What's still not built
 
 Nothing in Phase 3's own brief-numbered catalog. What Phase 3 depends on and doesn't build itself:
-real call placement and live call-event data (Phase 5, Telnyx-gated), the dialer UI/softphone layer
-that actually calls W3.1/W3.6/W3.3/W3.4/W3.5 (and W2.6/W2.7's gates) in sequence (not part of this
-repo's n8n workflow library — see `CRM-OBJECT-MODEL.md`'s Rep object note on `sipExtension`/
-local-presence dialing being Telnyx-gated too), a real state/zip → timezone lookup for W2.7's
+real call placement and live call-event data is now built (Phase 5, `phase-5-telnyx-activation/` —
+Preview-mode only, against placeholder Telnyx credentials); still missing is the dialer UI/softphone
+layer that actually calls `dialer-place-call.workflow.json` (which in turn calls W3.1/W3.6/W3.3/W3.4/
+W3.5 and W2.6/W2.7's gates in sequence) — not part of this repo's n8n workflow library, tracked as
+the Deals Desk/dialer UI task, sequenced last — a real state/zip → timezone lookup for W2.7's
 calling-hours check (currently server-local-hour, flagged as a known limitation in that workflow's
 own notes), reviving `FutureRework` HopperEntries into a new Campaign/wave 1 (parked, not automated —
 CRM-OBJECT-MODEL.md flags this explicitly), and Twenty CRM's real REST response shapes for

@@ -276,13 +276,14 @@ no further wiring needed.
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W5.1 | Telnyx SIP trunk / number provisioning | Manual (account setup) | N/A (infra, not a runtime automation) | Not started |
-| W5.2 | Dialer live call placement (Preview/Power/3-Line) + AMD + local presence | Agent action | **Human gate** — a live outbound call is an external send | Not started |
-| W5.3 | Demo extension auto-assignment (1000+) | Threshold/volume trigger | Auto (internal) | Not started |
+| W5.1 | Telnyx SIP trunk / number provisioning | Manual (account setup) | N/A (infra, not a runtime automation) | Documented runbook — see `phase-5-telnyx-activation/README.md`; number-search/ordering automation is a natural follow-up once real area-code coverage data exists, not built speculatively |
+| W5.2 | Dialer live call placement (Preview mode) + AMD + local presence + call recording disclosure | Agent action (via `dialer-place-call.workflow.json`) | Gated by W2.6/W2.7 (DNC + compliant hours) synchronously before dialing | **Scaffolded** — `phase-5-telnyx-activation/dialer-place-call.workflow.json` + `telnyx-call-events-webhook.workflow.json`, against placeholder Telnyx credentials. Power/3-Line (multi-line) dialing explicitly not built — see that phase's own README |
+| W5.3 | Demo extension auto-assignment (1000+) | Fire-and-forget off demo generation (W1.2) | Auto (internal) | **Scaffolded, both sides** — `phase-5-telnyx-activation/demo-extension-auto-assign.workflow.json` (assignment, backed by a real atomic D1 counter in Command Center) + `demo-extension-inbound-call.workflow.json` (inbound lookup). The actual live voice-AI bridge for the inbound call is an honest, flagged gap — see that phase's own README |
 
-Deliberately not started — the brief scopes Telnyx to Phase 5, the one piece with a genuine reason
-to wait (SIP/number verification queues), same placeholder-strategy rule applied to `src/server/`
-(`PLACEHOLDER_TELNYX_SIP_TRUNK` etc. where that infra would eventually plug in).
+Built this pass against placeholder Telnyx credentials (`command-center/src/vendors.ts`'s new
+`telnyx` vendor entry) — same "ready to go the moment real keys land" treatment Stripe got in
+Phase 1, even though the brief's own reason to defer this phase (SIP/number verification queues)
+is still real and still means nothing here can actually place a call yet.
 
 **Resolved in v2, was flagged as an open tension in the previous version of this library:** the
 automation risk boundary's "human gate on anything touching billing/contract stage" and the
@@ -316,7 +317,7 @@ Six specific gaps `06` named without giving them their own W-number. All six bui
 | Gap | Workflow(s) | Detail |
 |---|---|---|
 | TCPA consent capture | `phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` (write) + `phase-3-dialer-hopper/hopper-load-campaign.workflow.json` (enforce) | `phase-1-mvp/README.md` |
-| Call recording disclosure | *(deferred — folded into Phase 5's Telnyx build, since disclosure is a call-flow/IVR concern that doesn't exist until the dialer itself does)* | `phase-3-dialer-hopper/README.md` once built |
+| Call recording disclosure | `phase-5-telnyx-activation/telnyx-call-events-webhook.workflow.json` | `phase-5-telnyx-activation/README.md` |
 | Portal abandonment | `phase-1-mvp/proposal-viewed.workflow.json` + `phase-1-mvp/portal-abandonment-followup.workflow.json` | `phase-1-mvp/README.md` |
 | Failed/declined payment — dunning | `phase-1-mvp/stripe-payment-to-crm.workflow.json` (dunning branch) | `phase-1-mvp/README.md` |
 | Refund gate | `phase-1-mvp/refund-request.workflow.json` | `phase-1-mvp/README.md` |
@@ -401,7 +402,9 @@ Every workflow that needs a vendor credential references it by the same name the
 wizard writes to Cloudflare Secrets Store (`command-center/src/vendors.ts`), so wiring a real n8n
 instance up later is a rename-free copy: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY`,
 `TWENTY_CRM_API_KEY`, `PLUNK_API_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`,
-`STRIPE_WEBHOOK_SECRET`, `N8N_INSTANCE_URL`, `N8N_API_KEY`. **`DOCUMENSO_API_KEY` is gone** — brief
+`STRIPE_WEBHOOK_SECRET`, `N8N_INSTANCE_URL`, `N8N_API_KEY`, and — new this pass, Phase 5 —
+`TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_SIP_DOMAIN`, `TELNYX_DEFAULT_FROM_NUMBER`,
+`TELNYX_DEMO_LINE_NUMBER`. **`DOCUMENSO_API_KEY` is gone** — brief
 v2 moved Documenso out of the Phase 1 credential set entirely (see `phase-1-mvp/README.md`). Where a
 workflow needs a credential with no Secrets Store entry yet (e.g. the Places API key — see
 `src/server/README.md`), that's flagged the same way there.

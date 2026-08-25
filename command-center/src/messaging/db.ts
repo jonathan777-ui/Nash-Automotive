@@ -380,3 +380,36 @@ export async function resolveAiActionRequest(
     .run()) as { meta?: { changes?: number } } | undefined;
   return (result?.meta?.changes ?? 0) > 0;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Demo extension allocation (Phase 5, W5.3 — "Demo extension auto-assignment (1000+)") — a single
+// global counter starting at 1000, one row per demo generated (W1.2), so a prospect can call in and
+// dial their own extension to hear their specific AI receptionist demo. Lives here (not Twenty CRM)
+// because it needs an atomic increment with no concurrent-double-assignment risk, and Twenty CRM's
+// REST API has no confirmed atomic-increment primitive (same gap flagged in hopper-request-next's
+// claim race-condition notes) — D1 can do a real compare-and-swap here instead of a guess.
+// ---------------------------------------------------------------------------------------------
+
+/** Compare-and-swap loop over a single-row counter table (seeded at 1000 when the table was
+ * created) - reads the current value, then only commits the increment if nothing else changed it
+ * in between (same `meta.changes` idiom as acknowledgeAlert/resolveAiActionRequest above). Retries
+ * a few times under contention rather than failing on the first collision - demo-volume traffic is
+ * low, so a handful of retries is more than enough headroom. Throws (rather than returning a
+ * sentinel) after exhausting retries, since a workflow calling this has no reasonable fallback
+ * extension number to use instead - a genuine failure, not a normal "not found" case. */
+export async function allocateDemoExtension(db: D1Like, maxAttempts = 5): Promise<number> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { results } = await db
+      .prepare('SELECT next_extension FROM demo_extension_counter WHERE id = 1')
+      .all<{ next_extension: number }>();
+    const current = results[0]?.next_extension;
+    if (current == null) throw new Error('demo_extension_counter row is missing - table not seeded.');
+
+    const result = (await db
+      .prepare('UPDATE demo_extension_counter SET next_extension = ? WHERE id = 1 AND next_extension = ?')
+      .bind(current + 1, current)
+      .run()) as { meta?: { changes?: number } } | undefined;
+    if ((result?.meta?.changes ?? 0) > 0) return current;
+  }
+  throw new Error(`Could not allocate a demo extension after ${maxAttempts} attempts (concurrent contention).`);
+}

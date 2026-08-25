@@ -6,6 +6,7 @@ import { getAllStatuses, markConnected, type VendorStatus } from './status.js';
 import {
   handleAcknowledgeAlert,
   handleAiActionRequestsIngest,
+  handleAllocateDemoExtension,
   handleAlertsIngest,
   handleCreateChannel,
   handleMarkNotificationRead,
@@ -112,6 +113,9 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/ai-action-requests') {
       return withMachineAuth(request, env, () => handleAiActionRequestsIngest(request, env.MESSAGING_DB));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/demo-extensions/allocate') {
+      return withMachineAuth(request, env, () => handleAllocateDemoExtension(env.MESSAGING_DB));
     }
 
     const access = await verifyAccess(request, env);

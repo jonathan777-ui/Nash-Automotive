@@ -1,0 +1,93 @@
+{
+  "name": "Orbit AI - Phase 5 - Demo extension auto-assignment (W5.3)",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "name": "Demo extension assign webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1160, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo-extension-auto-assign",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "W5.3: 'Demo extension auto-assignment (1000+).' Fire-and-forget caller, same pattern as opening-line-tracking.workflow.json - the calling workflow (demo-generation-trigger.workflow.json, wired this pass) doesn't wait on this. Input: {locationId}. Lets a prospect call the shared Telnyx demo line and dial their own extension to reach their specific business's AI receptionist demo - see demo-extension-inbound-call.workflow.json for the other half (the inbound lookup)."
+    },
+    {
+      "id": "b2c3d4e5-f6a7-4b8c-9dae-1f2a3b4c5d6e",
+      "name": "Allocate extension",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/demo-extensions/allocate",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "POSTs with no body - the counter is global (command-center/src/messaging/db.ts's allocateDemoExtension), not scoped to anything this workflow provides. Reuses the ALERTS_INGEST_SECRET machine-auth credential like every other n8n-to-Command-Center call. A real atomic compare-and-swap on D1, not a guessed increment - see that function's own notes for why Twenty CRM's REST API wasn't used for this counter (no confirmed atomic-increment primitive there, same gap flagged in hopper-request-next's claim race-condition notes)."
+    },
+    {
+      "id": "c3d4e5f6-a7b8-4c9d-ae01-2f3a4b5c6d7e",
+      "name": "Write extension to Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-680, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $('Demo extension assign webhook').item.json.body.locationId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ demoExtension: $json.extension }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New field this pass, CRM-OBJECT-MODEL.md's Location object. Once written, demo-extension-inbound-call.workflow.json can resolve an inbound DTMF-dialed extension back to this Location."
+    },
+    {
+      "id": "d4e5f6a7-b8c9-4dae-bf01-3a4b5c6d7e8f",
+      "name": "Alert: demo extension assigned",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'demo-generation', message: 'Demo extension ' + $('Allocate extension').item.json.extension + ' assigned - dial ' + ($env.TELNYX_DEMO_LINE_NUMBER || 'PLACEHOLDER_TELNYX_DEMO_LINE_NUMBER') + ' ext. ' + $('Allocate extension').item.json.extension + ' to hear it live.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/location/' + $('Demo extension assign webhook').item.json.body.locationId }) }}",
+        "options": {}
+      },
+      "notes": "Routes to #demos (alertRouting.ts matches 'demo-generation' - same source string demo-generation-trigger.workflow.json's own alerts use, since this is the same demo-readiness event from the rep's point of view, just the phone-reachable half of it)."
+    }
+  ],
+  "connections": {
+    "Demo extension assign webhook": {
+      "main": [[{ "node": "Allocate extension", "type": "main", "index": 0 }]]
+    },
+    "Allocate extension": {
+      "main": [[{ "node": "Write extension to Location", "type": "main", "index": 0 }]]
+    },
+    "Write extension to Location": {
+      "main": [[{ "node": "Alert: demo extension assigned", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

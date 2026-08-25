@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FakeD1 } from './fakeD1.js';
 import {
   acknowledgeAlert,
+  allocateDemoExtension,
   createAiActionRequest,
   createChannel,
   createNotification,
@@ -263,5 +264,37 @@ describe('createAiActionRequest / listPendingAiActionRequests / resolveAiActionR
   it('returns false when the request was already resolved (no rows changed)', async () => {
     const db = new FakeD1([], [{ success: true, meta: { changes: 0 } }]);
     expect(await resolveAiActionRequest(db, 'r1', 'reviewer@orbitaiautomation.com', true)).toBe(false);
+  });
+});
+
+describe('allocateDemoExtension', () => {
+  it('returns the current value and commits the increment on the first try', async () => {
+    const db = new FakeD1([{ results: [{ next_extension: 1000 }] }], [{ success: true, meta: { changes: 1 } }]);
+    const extension = await allocateDemoExtension(db);
+    expect(extension).toBe(1000);
+    const updateCall = db.calls.find((c) => c.sql.includes('UPDATE demo_extension_counter'));
+    expect(updateCall?.params).toEqual([1001, 1000]);
+  });
+
+  it('retries under contention (a collided compare-and-swap) and succeeds on the next attempt', async () => {
+    const db = new FakeD1(
+      [{ results: [{ next_extension: 1000 }] }, { results: [{ next_extension: 1001 }] }],
+      [{ success: true, meta: { changes: 0 } }, { success: true, meta: { changes: 1 } }],
+    );
+    const extension = await allocateDemoExtension(db);
+    expect(extension).toBe(1001);
+  });
+
+  it('throws after exhausting all retry attempts under sustained contention', async () => {
+    const db = new FakeD1(
+      [{ results: [{ next_extension: 1000 }] }, { results: [{ next_extension: 1000 }] }],
+      [{ success: true, meta: { changes: 0 } }, { success: true, meta: { changes: 0 } }],
+    );
+    await expect(allocateDemoExtension(db, 2)).rejects.toThrow(/Could not allocate/);
+  });
+
+  it('throws if the counter row is missing (table not seeded)', async () => {
+    const db = new FakeD1([{ results: [] }]);
+    await expect(allocateDemoExtension(db)).rejects.toThrow(/not seeded/);
   });
 });

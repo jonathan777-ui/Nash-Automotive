@@ -62,10 +62,11 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   those rows is just a "mark connected" checkbox, tracked in a new Cloudflare KV namespace
   (`STATUS`) I provisioned directly during this build — a real, non-placeholder resource, since KV
   is one of the few things the tools in this session could actually create.
-- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n) work
-  exactly like checkpoint 2, generalized to handle vendors needing more than one field (n8n needs
-  both an instance URL and an API key; Stripe needs a publishable key, secret key, and webhook
-  signing secret).
+- **Manual-paste vendors** (Claude API, Gemini API, Grok API, Twenty CRM, Plunk, Stripe, n8n, and —
+  new this pass — Telnyx) work exactly like checkpoint 2, generalized to handle vendors needing more
+  than one field (n8n needs both an instance URL and an API key; Stripe needs a publishable key,
+  secret key, and webhook signing secret; Telnyx needs five: an API key, a Call Control connection
+  ID, a SIP domain, a default outbound number, and a shared demo-line number).
 - **Documenso is deliberately not in this list.** Brief v2 / `02 - Launch Checklist` v2 moved it
   out of Phase 1's credential set entirely — MVP e-sign is a lightweight inline capture built
   directly into the portal (typed name + checkbox + timestamp + IP, no vendor account needed).
@@ -74,11 +75,13 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   Telnyx) has no account-verification-queue blocker, so the whole payment-link + webhook + CRM
   stage-advance flow is built now against placeholder values and activates the moment real keys
   land here. See `workflows/phase-1-mvp/stripe-payment-to-crm.workflow.json`.
-- **Three rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, and Gemini/AI Studio.
-  I could not verify from here whether Oracle's `oci setup config` is genuinely a one-click flow
-  like the other three, whether `gcloud auth application-default login` alone is sufficient for
-  Drive API access or just a first step, or whether the Gemini API key issuance might actually
-  route through that same Google Cloud CLI login rather than needing its own manual paste. See the
+- **Four rows are marked `⚠ unconfirmed`** in the UI: Oracle, Google Cloud, Gemini/AI Studio, and —
+  new this pass — Telnyx. I could not verify from here whether Oracle's `oci setup config` is
+  genuinely a one-click flow like the other three, whether `gcloud auth application-default login`
+  alone is sufficient for Drive API access or just a first step, whether the Gemini API key issuance
+  might actually route through that same Google Cloud CLI login rather than needing its own manual
+  paste, or the exact number of manual setup steps in the Telnyx portal (SIP trunk creation, Call
+  Control app, number search/ordering) behind the five fields this form collects. See the
   `uncertain` fields and their comments in `src/vendors.ts` for specifics — worth checking against
   reality during the checkpoint-3 walkthrough rather than assuming the guess is right.
 

@@ -1,0 +1,302 @@
+{
+  "name": "Orbit AI - Phase 5 - Live dialer call placement (W5.2)",
+  "nodes": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Place call webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1700, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dialer-place-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "'This is the not-yet-built live-dial engine' every W2.6/W2.7/W3.5 caller reference has been pointing at since those workflows were built - THIS is that caller, real for the first time this pass. Meant to be invoked by the dialer UI/softphone layer (Task: Deals Desk / dialer UI, not part of this n8n library - see workflows/README.md's 'How this library relates to the rest of the repo') right after a rep claims a HopperEntry via hopper-request-next.workflow.json (W3.1). Input: {hopperEntryId, opportunityId, locationId, repId, repSipExtension, phoneNumber, dialerMode}. Preview-mode single-line calling only - see this workflow's own README section on what Power/3-Line dialing (opening multiple simultaneous lines per agent) would need beyond this."
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "DNC check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1460, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/dnc-check",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $json.body.opportunityId }) }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "notes": "W2.6, called synchronously for real - dnc-check.workflow.json's own notes have said 'meant to be called synchronously by the dialer's own call-placement action before it ever dials' since it was built; this is that call. No overrideRequested/overrideBy passed - an override has to be an explicit rep action with a reason, not something this generic call-placement step silently forwards. neverError:true so a 403 comes back as data to branch on."
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "DNC allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1220, -100],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "Respond: blocked (DNC)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-980, 40],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 403,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: $json.reason || 'Blocked by DNC check.' }) }}"
+      }
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "Compliant hours check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-980, -200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/compliant-hours-consent-gate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ opportunityId: $('Place call webhook').item.json.body.opportunityId, locationId: $('Place call webhook').item.json.body.locationId }) }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "notes": "W2.7, same 'called synchronously alongside DNC, not instead of it' pairing that workflow's own notes describe. requestedAt omitted - checked against right now, since this is an actual dial happening this instant, not a scheduled/queued one."
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "Hours/consent allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-740, -200],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Respond: blocked (hours/consent)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-500, -60],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 403,
+        "responseBody": "={{ JSON.stringify({ ok: false, reason: $json.reason || 'Blocked by compliant-hours/consent check.' }) }}"
+      }
+    },
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "name": "Find local-presence number",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-500, -340],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telnyx.com/v2/phone_numbers?filter[phone_number][starts_with]=%2B1{{ $('Place call webhook').item.json.body.phoneNumber.replace(/\\D/g, '').slice(-10, -7) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "Local presence: queries the account's OWN Telnyx number inventory for one already starting with the callee's area code (assumes phoneNumber is a US 10 or 11-digit number; last-10-digits-minus-4 extracts the 3-digit NPA). This is a real Telnyx API shape (GET /v2/phone_numbers with a filter[phone_number][starts_with] query param), not guessed at random, but UNVERIFIED against a live Telnyx account - confirm the exact filter operator name/nesting once real credentials exist, same caveat as Stripe's rawBody assumption elsewhere in this repo. Building the actual number-buying/pooling side (searching + ordering NEW numbers per area code as the campaign footprint grows) is W5.1's job, not this workflow's - this only picks from whatever the account already owns."
+    },
+    {
+      "id": "99999999-9999-4999-8999-999999999999",
+      "name": "Pick FROM number",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-260, -340],
+      "parameters": {
+        "jsCode": "// Falls back to a single main number when no area-code match exists in the account's inventory\n// (a small/starting number pool, or the lookup call itself failed/errored) - a call still goes out,\n// just without the local-presence answer-rate boost, rather than blocking the dial entirely over a\n// number-pool gap. Flagged, not silent: 'usedFallback' is passed through to the alert below so a\n// thin number pool is visible, not just quietly degrading connect rates forever.\nconst response = $input.first().json;\nconst numbers = response?.data || (Array.isArray(response) ? response : []);\nconst match = Array.isArray(numbers) ? numbers[0] : null;\n\nreturn [{\n  json: {\n    fromNumber: match?.phone_number || $env.TELNYX_DEFAULT_FROM_NUMBER || 'PLACEHOLDER_TELNYX_DEFAULT_FROM_NUMBER',\n    usedFallback: !match,\n  },\n}];"
+      }
+    },
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "Build client_state (customer leg)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-20, -340],
+      "parameters": {
+        "jsCode": "// Telnyx echoes client_state back on every webhook event for this call leg - this is how\n// telnyx-call-events-webhook.workflow.json correlates an async event back to hopper/CRM state\n// without a second lookup table, per CRM-OBJECT-MODEL.md's HopperEntry notes on the two new Telnyx\n// call-control-id fields. base64, matching Telnyx's own documented client_state encoding.\nconst webhookBody = $('Place call webhook').item.json.body;\nconst state = {\n  role: 'customer',\n  hopperEntryId: webhookBody.hopperEntryId,\n  opportunityId: webhookBody.opportunityId,\n  repId: webhookBody.repId,\n  dialerMode: webhookBody.dialerMode,\n};\nreturn [{ json: { clientState: Buffer.from(JSON.stringify(state)).toString('base64') } }];"
+      }
+    },
+    {
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "name": "Dial customer leg",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -340],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/calls",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ connection_id: $env.TELNYX_CONNECTION_ID || 'PLACEHOLDER_TELNYX_CONNECTION_ID', to: $('Place call webhook').item.json.body.phoneNumber, from: $('Pick FROM number').item.json.fromNumber, answering_machine_detection: 'premium', webhook_url: ($env.N8N_INSTANCE_URL || '') + '/webhook/telnyx-call-events', client_state: $json.clientState }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "Real Telnyx Call Control v2 API shape (POST /v2/calls, answering_machine_detection:'premium' triggers AMD - Telnyx fires a separate call.machine.detection.ended event with the result once it resolves), not guessed - but UNVERIFIED against a live account, same treatment as every other external integration point in this repo before real credentials exist. This is the AMD half of W5.2."
+    },
+    {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "name": "Build client_state (agent leg)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, -180],
+      "parameters": {
+        "jsCode": "const webhookBody = $('Place call webhook').item.json.body;\nconst state = { role: 'agent', hopperEntryId: webhookBody.hopperEntryId, opportunityId: webhookBody.opportunityId, repId: webhookBody.repId };\nreturn [{ json: { clientState: Buffer.from(JSON.stringify(state)).toString('base64') } }];"
+      }
+    },
+    {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "name": "Dial agent leg",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, -180],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/calls",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ connection_id: $env.TELNYX_CONNECTION_ID || 'PLACEHOLDER_TELNYX_CONNECTION_ID', to: 'sip:' + $('Place call webhook').item.json.body.repSipExtension + '@' + ($env.TELNYX_SIP_DOMAIN || 'PLACEHOLDER_TELNYX_SIP_DOMAIN'), from: $('Pick FROM number').item.json.fromNumber, webhook_url: ($env.N8N_INSTANCE_URL || '') + '/webhook/telnyx-call-events', client_state: $json.clientState }) }}",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Telnyx API"
+        }
+      },
+      "notes": "Dials the rep's own internal SIP extension (Rep.sipExtension, CRM-OBJECT-MODEL.md - 'reps get an internal extension on one shared Telnyx SIP trunk/connection, not individual DIDs'). This leg and the customer leg above are dialed in parallel and bridged together once the customer leg's AMD result comes back 'human' - see telnyx-call-events-webhook.workflow.json. No AMD needed on this leg (it's an internal extension, not answered by voicemail)."
+    },
+    {
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "name": "Write call-control IDs to HopperEntry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, -260],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/hopperEntries/{{ $('Place call webhook').item.json.body.hopperEntryId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ telnyxCustomerCallControlId: $('Dial customer leg').item.json.data ? $('Dial customer leg').item.json.data.call_control_id : $('Dial customer leg').item.json.call_control_id, telnyxAgentCallControlId: $('Dial agent leg').item.json.data ? $('Dial agent leg').item.json.data.call_control_id : $('Dial agent leg').item.json.call_control_id }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The correlation write CRM-OBJECT-MODEL.md's HopperEntry notes describe - telnyx-call-events-webhook.workflow.json reads telnyxAgentCallControlId back off this same HopperEntry (looked up via hopperEntryId, itself carried in client_state) once the customer leg's AMD result says 'human', so it knows which agent leg to bridge to. Handles both Telnyx's documented {data: {...}} envelope and a bare object, since which shape a real response actually uses isn't confirmed from this sandbox."
+    },
+    {
+      "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      "name": "Respond: dialing",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [940, -260],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, dialing: true }) }}"
+      },
+      "notes": "Fire-and-forget from here - the dialer UI doesn't wait for the call to actually connect (that's async, delivered via telnyx-call-events-webhook.workflow.json and whatever live-status channel the UI subscribes to, not part of this n8n library - see the Deals Desk/dialer UI task)."
+    }
+  ],
+  "connections": {
+    "Place call webhook": {
+      "main": [[{ "node": "DNC check", "type": "main", "index": 0 }]]
+    },
+    "DNC check": {
+      "main": [[{ "node": "DNC allowed?", "type": "main", "index": 0 }]]
+    },
+    "DNC allowed?": {
+      "main": [
+        [{ "node": "Compliant hours check", "type": "main", "index": 0 }],
+        [{ "node": "Respond: blocked (DNC)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Compliant hours check": {
+      "main": [[{ "node": "Hours/consent allowed?", "type": "main", "index": 0 }]]
+    },
+    "Hours/consent allowed?": {
+      "main": [
+        [{ "node": "Find local-presence number", "type": "main", "index": 0 }],
+        [{ "node": "Respond: blocked (hours/consent)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Find local-presence number": {
+      "main": [[{ "node": "Pick FROM number", "type": "main", "index": 0 }]]
+    },
+    "Pick FROM number": {
+      "main": [[{ "node": "Build client_state (customer leg)", "type": "main", "index": 0 }]]
+    },
+    "Build client_state (customer leg)": {
+      "main": [[{ "node": "Dial customer leg", "type": "main", "index": 0 }]]
+    },
+    "Dial customer leg": {
+      "main": [[{ "node": "Build client_state (agent leg)", "type": "main", "index": 0 }]]
+    },
+    "Build client_state (agent leg)": {
+      "main": [[{ "node": "Dial agent leg", "type": "main", "index": 0 }]]
+    },
+    "Dial agent leg": {
+      "main": [[{ "node": "Write call-control IDs to HopperEntry", "type": "main", "index": 0 }]]
+    },
+    "Write call-control IDs to HopperEntry": {
+      "main": [[{ "node": "Respond: dialing", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

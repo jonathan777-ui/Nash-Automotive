@@ -123,6 +123,27 @@ export const VENDORS: VendorDef[] = [
     ],
     hint: 'Already self-hosted on the Oracle box — this just needs current access, not a new account.',
   },
+  {
+    id: 'telnyx',
+    label: 'Telnyx',
+    authMode: 'manual',
+    fields: [
+      { key: 'apiKey', label: 'API key (v2)', secretName: 'TELNYX_API_KEY' },
+      { key: 'connectionId', label: 'Call Control connection ID', secretName: 'TELNYX_CONNECTION_ID' },
+      { key: 'sipDomain', label: 'SIP domain (for rep extensions)', secretName: 'TELNYX_SIP_DOMAIN' },
+      { key: 'defaultFromNumber', label: 'Default outbound number (E.164)', secretName: 'TELNYX_DEFAULT_FROM_NUMBER' },
+      { key: 'demoLineNumber', label: 'Shared demo-line number (E.164)', secretName: 'TELNYX_DEMO_LINE_NUMBER' },
+    ],
+    hint:
+      'Phase 5 — the one deliberately-deferred piece per the brief\'s own "genuine reason to wait" ' +
+      '(SIP trunk / number verification queues). portal.telnyx.com → API Keys for the v2 key, Call ' +
+      'Control → Connections for the connection ID, Voice → SIP Connections for the SIP domain reps ' +
+      'dial their internal extensions through. All five values are placeholders ' +
+      '(PLACEHOLDER_TELNYX_...) in every Phase 5 workflow until set here — dialer-place-call.workflow.json, ' +
+      'telnyx-call-events-webhook.workflow.json, and demo-extension-auto-assign.workflow.json are ' +
+      'built and waiting, not blocked on anything but this.',
+    uncertain: true, // no CLI-auth path found for Telnyx (manual API key + portal-configured Call Control connection/SIP domain), and the exact number of setup steps in the Telnyx portal (SIP trunk creation, Call Control app, number search/ordering) isn't independently confirmed from this sandbox.
+  },
 ];
 
 /** The original checkpoint-2 pair, kept as a stable export in case anything still imports it.

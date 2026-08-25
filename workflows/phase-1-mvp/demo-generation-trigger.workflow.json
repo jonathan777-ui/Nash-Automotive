@@ -101,6 +101,22 @@
       "notes": "NEW (object model migration): demo generation is inherently per-Location per CRM-OBJECT-MODEL.md, since src/server/'s /generate-demo call is itself scoped to one GBP/business. ASSUMES the triggering webhook payload now also carries 'locationId' (added alongside opportunityId) - whatever calls this webhook (the Demo Dashboard UI/action) needs to know which Location it's regenerating a demo for, which matters once an Opportunity spans more than one. demoStepUsed here correctly reads $json.stepUsed - unlike the two opportunityId/locationId reads, THIS field genuinely does come from the demo generator's own response (the current $json at this point), not the original webhook body. Add a demoSiteUrl field here once a real hosted-demo URL exists (the 'Demo Site' status badge Section 13 describes)."
     },
     {
+      "id": "e5a2c8f1-3b4d-4e6f-8a9b-c1d2e3f4a5b6",
+      "name": "Assign demo extension",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, -280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/demo-extension-auto-assign",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ locationId: $('Generate demo webhook').item.json.body.locationId }) }}",
+        "options": {}
+      },
+      "notes": "Phase 5/W5.3, new this pass - fire-and-forget, same pattern as W1.6's opening-line-tracking branch. Safe to call unconditionally: demo-extension-auto-assign.workflow.json's real logic (Command Center's atomic counter, Telnyx credentials only needed at actual inbound-call time, not here) works today even before Telnyx is live - only the eventual inbound dial-in needs real Telnyx credentials. NOTE: this webhook node's responseMode is 'lastNode', and this is now a THIRD parallel branch off 'Generated OK?' alongside the two existing ones - same pre-existing ambiguity about which parallel branch's output actually becomes the webhook's response body (not newly introduced by this change, already true with two branches; flagged here since it's more visible with three)."
+    },
+    {
       "id": "a4f1b771-ae6f-41a2-9a77-cba7fbcb3289",
       "name": "Alert: generation failed",
       "type": "n8n-nodes-base.httpRequest",
@@ -128,7 +144,8 @@
       "main": [
         [
           { "node": "Advance Opportunity to Pending Demos", "type": "main", "index": 0 },
-          { "node": "Write demo status to Location", "type": "main", "index": 0 }
+          { "node": "Write demo status to Location", "type": "main", "index": 0 },
+          { "node": "Assign demo extension", "type": "main", "index": 0 }
         ],
         [{ "node": "Alert: generation failed", "type": "main", "index": 0 }]
       ]

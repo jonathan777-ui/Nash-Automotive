@@ -3,6 +3,7 @@ import { channelForSource } from './alertRouting.js';
 import { parseMentions } from './mentions.js';
 import {
   acknowledgeAlert,
+  allocateDemoExtension,
   createAiActionRequest,
   createChannel,
   createNotification,
@@ -528,4 +529,22 @@ export async function handleResolveAiAction(request: Request, db: D1Like, resolv
 
   await resolveAiActionRequest(db, requestId, resolvedByEmail, decision === 'approve');
   return Response.redirect(new URL('/messaging', request.url).toString(), 303);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Demo extension allocation (Phase 5, W5.3) — machine-to-machine, same ALERTS_INGEST_SECRET trust
+// boundary as the other /api/* ingest routes above. Called by demo-extension-auto-assign.workflow.json
+// right after a demo is generated (W1.2), fire-and-forget from that workflow's own success path.
+// ---------------------------------------------------------------------------------------------
+
+/** No request body needed - the counter is global, not scoped to anything the caller provides.
+ * Returns the allocated extension as a number, not a string, so the caller doesn't have to parse it
+ * before doing arithmetic/formatting on it (e.g. zero-padding for a dial-string). */
+export async function handleAllocateDemoExtension(db: D1Like): Promise<Response> {
+  try {
+    const extension = await allocateDemoExtension(db);
+    return new Response(JSON.stringify({ ok: true, extension }), { status: 200, headers: { 'content-type': 'application/json' } });
+  } catch (err) {
+    return new Response(JSON.stringify({ ok: false, reason: (err as Error).message }), { status: 500 });
+  }
 }

@@ -213,10 +213,16 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
    notification within seconds. Tag `ai-employee` with an unrecognized action (e.g. `send-email`)
    and confirm it shows up instead under "AI actions awaiting approval" — click Reject and confirm
    it disappears from that list without anything having been sent.
+7. **New this pass (Phase 5 — demo extension allocation):**
+   `curl -X POST https://<your-worker>/api/demo-extensions/allocate -H "Authorization: Bearer <secret>"`
+   should `200` with `{"ok":true,"extension":1000}` on the very first call against a fresh
+   `demo_extension_counter` row (already seeded live, see below), incrementing by one on each
+   subsequent call regardless of caller — the counter is global, not scoped to a workflow run.
 
-The `alerts` table's `link_url`/`acknowledged_by`/`acknowledged_at`/`channel` columns, and the new
-`notifications`/`ai_action_requests` tables, were all applied directly to the live D1 database via
-the Cloudflare MCP tools across these passes — no manual `ALTER TABLE`/`CREATE TABLE` needed on your
+The `alerts` table's `link_url`/`acknowledged_by`/`acknowledged_at`/`channel` columns, the
+`notifications`/`ai_action_requests` tables, and the new `demo_extension_counter` table (seeded at
+`1000`, Phase 5/W5.3) were all applied directly to the live D1 database via the Cloudflare MCP tools
+across these passes — no manual `ALTER TABLE`/`CREATE TABLE` needed on your
 end, same "actually do it with the live tools available" discipline as the schema's original
 creation. One new env var to set for real once n8n exists: `N8N_INSTANCE_URL` (plain, not a secret —
 see `wrangler.toml`), the base URL Command Center calls out to for Tag-for-Action.

@@ -1,0 +1,105 @@
+{
+  "name": "Orbit AI - Phase 5 - Demo extension inbound call lookup (W5.3, other half)",
+  "nodes": [
+    {
+      "id": "f1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c",
+      "name": "Telnyx demo line inbound webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo-extension-inbound-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "The TeXML/Call Control webhook_url configured on the shared TELNYX_DEMO_LINE_NUMBER's Telnyx application, hit once a caller has dialed in and entered an extension via DTMF gather (the gather step itself is Telnyx application config, not something this n8n workflow controls - it only receives the already-collected digits). UNVERIFIED payload shape: assumed {Digits: string} matching Telnyx's TeXML gather-result convention; if this account's app is Call Control (not TeXML), the equivalent is a 'call.dtmf.received' Call Control webhook event instead, with a different payload shape entirely - same 'flagged uncertain against a live account, not exercised against one' caveat as every Stripe/Telnyx integration point in this repo."
+    },
+    {
+      "id": "a2b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d",
+      "name": "Fetch Location by extension",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations?filter=demoExtension[eq]:{{ $json.body.Digits }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The lookup half of W5.3 - resolves the dialed extension (written by demo-extension-auto-assign.workflow.json) back to the Location it belongs to."
+    },
+    {
+      "id": "b3c4d5e6-f7a8-4b9c-ad01-2f3a4b5c6d7e",
+      "name": "Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-920, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.data && $json.data.locations && $json.data.locations[0]) || ($json.locations && $json.locations[0]) }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4cad-be01-3f4a5b6c7d8e",
+      "name": "Respond: play demo (NOT BUILT)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-680, -100],
+      "parameters": {
+        "respondWith": "text",
+        "responseCode": 200,
+        "responseBody": "<Response><Say>Thanks for calling. We found your demo, but the live voice connection isn't built yet - a human will follow up shortly.</Say><Hangup/></Response>"
+      },
+      "notes": "HONEST GAP, not guessed at: this workflow can correctly identify WHICH Location's demo was requested, but actually connecting the caller to a live, real-time conversational voice experience of that Location's AI receptionist (using its unifiedKb) needs a live voice-AI pipeline - real-time speech-to-text, an LLM turn loop grounded in the unifiedKb, and text-to-speech, bridged onto this same Telnyx call leg - that doesn't exist anywhere in this repo. src/server/'s /generate-demo produces a unifiedKb (a knowledge-base object) and a web/chat demo, not a phone-callable voice agent. Building a fake version of that bridge here would be worse than the honest placeholder TeXML response above (a real, valid TeXML document that speaks a truthful message and hangs up, not a broken/silent call). This is the single largest deferred piece of W5.3 - same treatment as Front Door Audit's unscored 10 categories: named by the brief's outcome, not a decided mechanism, so not invented here."
+    },
+    {
+      "id": "d5e6f7a8-b9ca-4dbe-af01-4a5b6c7d8e9f",
+      "name": "Respond: extension not found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-680, 100],
+      "parameters": {
+        "respondWith": "text",
+        "responseCode": 200,
+        "responseBody": "<Response><Say>Sorry, that extension wasn't recognized. Please check the extension number and try again.</Say><Hangup/></Response>"
+      }
+    }
+  ],
+  "connections": {
+    "Telnyx demo line inbound webhook": {
+      "main": [[{ "node": "Fetch Location by extension", "type": "main", "index": 0 }]]
+    },
+    "Fetch Location by extension": {
+      "main": [[{ "node": "Found?", "type": "main", "index": 0 }]]
+    },
+    "Found?": {
+      "main": [
+        [{ "node": "Respond: play demo (NOT BUILT)", "type": "main", "index": 0 }],
+        [{ "node": "Respond: extension not found", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

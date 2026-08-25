@@ -117,6 +117,11 @@ to reference the original webhook trigger node directly, the same pattern the al
 used correctly. A `demoSiteUrl` link-out field on the Location is a natural addition once a real
 demo-hosting URL exists (not yet, per root README's "Next" section).
 
+**New this pass — Phase 5/W5.3 wiring.** A third fire-and-forget branch off `Generated OK?`'s success
+path calls `phase-5-telnyx-activation/demo-extension-auto-assign.workflow.json`, so every successful
+demo generation also gets a phone-dialable extension assigned automatically — see that phase's own
+README for what that does and, honestly, what it still can't do (the actual live voice-AI bridge).
+
 ## W1.4 — `portal-esign-submitted.workflow.json` *(replaces the old Documenso-based workflow)*
 
 *(Was mislabeled "W1.3" in an earlier version of this file — W1.3 is Proposal delivery, still

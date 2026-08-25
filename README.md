@@ -20,10 +20,12 @@ the project brief's build order:
   Company → Organization, plus Contract and Billing/Accounting Period) every piece above anchors
   its Twenty CRM reads/writes to. Start here for "what object does X live on."
 
-Piece 2 (the rest of the Command Center — pipeline visibility, system health) is lower priority and
-grows incrementally after Piece 1 ships; mostly not started, except **Internal Team Messaging**
-(channels, @mentions, CRM comment threads, in-app alerts — `command-center/src/messaging/`), built
-ahead of that sequencing once asked, backed by a real, already-provisioned Cloudflare D1 database.
+Piece 2 (the rest of the Command Center — pipeline visibility, system health) is now built out in
+full: **Internal Team Messaging** (channels, @mentions, CRM comment threads, Tag-for-Action, the
+real 11-channel alert taxonomy — `command-center/src/messaging/`), backed by a real, already-
+provisioned Cloudflare D1 database, plus **pipeline reporting** (a weekly funnel/revenue digest,
+`workflows/phase-6-reporting-support/pipeline-reporting-digest.workflow.json`) absorbing what was
+originally W6.1.
 
 **Brief v2 update:** Front Door Audit added as a real, parallel-running piece; MVP e-sign is now a
 lightweight inline capture, not Documenso; Stripe moved from deferred into Phase 1 with placeholder
@@ -188,33 +190,74 @@ surface yet.
 
 Also see `workflows/` for the n8n automation library spanning the rest of the lead-to-onboarding
 pipeline (Phases 0-7 of `01 - Roadmap`) — this repo's pieces are nodes in that larger system, not
-the whole of it.
+the whole of it. **All seven phases now have real, scaffolded workflows** (43 `.workflow.json`
+files across `phase-0-infrastructure/` through `phase-6-reporting-support/`, plus a documented
+runbook for Phase 7's Twenty CRM self-host migration) — see `workflows/README.md`'s own catalog for
+the phase-by-phase detail, and the honest accounting below for what's genuinely still open.
 
 ## Path to live — what plugging in real credentials actually activates
 
-Nothing in this repo is waiting on more code to go live — every piece that's marked "code-complete"
-above needs credentials, not further building, from here. In brief-recommended order:
+Nothing in this repo is waiting on more code to go live for anything credential-shaped — every piece
+marked "code-complete" below needs credentials and a live n8n import, not further building, from
+here. In brief-recommended order:
 
 1. **Deploy the Command Center** (`command-center/DEPLOY.md`) and run through its vendor checklist —
    this is where every credential gets gathered, either via one-click CLI auth or manual paste into
-   Cloudflare Secrets Store.
+   Cloudflare Secrets Store. `src/vendors.ts` now lists every vendor this repo actually calls,
+   including Telnyx (Phase 5) added this pass.
 2. **Deploy `src/server/`** (the demo generator) wherever it's meant to run long-term (the Oracle
    box, per the brief's infra split — `npm run serve`, or a process manager/Docker wrapper around
    it) with `CLAUDE_API_KEY` and a Google Places API key in its environment.
 3. **Deploy `portal/`** to Netlify (`netlify deploy`, or connect the repo with `portal/` as the base
-   directory) with `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`, `STRIPE_SECRET_KEY`, and
-   `N8N_ESIGN_WEBHOOK_URL` set as real Netlify environment variables.
-4. **Stand up n8n on the Oracle box** and import the workflows in `workflows/phase-0-infrastructure/`
-   and `workflows/phase-1-mvp/` — each will need the hand-fixing its own README already flags (the
-   Merge node in W1.1, the raw-body/signature path in the Stripe workflow, and Twenty CRM's exact
-   field names once a real instance exists to check them against).
-5. **Configure Twenty CRM** — Opportunity pipeline stages matching what every workflow/function here
-   assumes (Demo Queue, Pending Demos, Contract Signed, Onboarding, Live Client, ...), plus the
-   Communications Hub and Documents/Files custom objects from `05 §13` once those are built.
+   directory) with `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`, `STRIPE_SECRET_KEY`, and every
+   `N8N_..._WEBHOOK_URL` the Netlify Functions in `portal/netlify/functions/` reference, set as real
+   Netlify environment variables.
+4. **Stand up n8n on the Oracle box** and import all 43 workflows across `workflows/phase-0-*`
+   through `workflows/phase-6-*` — each phase's own README already flags exactly what's likely to
+   need hand-fixing on import (the Merge node in W1.1, the raw-body/signature path in the Stripe
+   workflow, Telnyx's Call Control payload shape in Phase 5, and Twenty CRM's exact field names
+   everywhere, once a real instance exists to check them against).
+5. **Configure Twenty CRM** — Opportunity/Company/Contract/HopperEntry/SupportTicket/etc. custom
+   objects and fields matching `CRM-OBJECT-MODEL.md` (the canonical reference every workflow/function
+   in this repo anchors to), and the Opportunity pipeline stages every workflow assumes (Demo Queue,
+   Pending Demos, Contract Signed, Won, ...).
+6. **Get real Telnyx credentials** (Phase 5, deliberately the one deferred vendor — see
+   `command-center/src/vendors.ts`'s `telnyx` row and `workflows/phase-5-telnyx-activation/README.md`)
+   once its account-verification queue clears; everything Telnyx-gated is built and waiting on this
+   specifically, not on further code.
 
-Once 1-5 are done, the only remaining gaps are the pieces flagged throughout as genuinely new design
-work, not missing credentials: Deep Dive Research and Front Door Audit as real services (their
-contracts/scoring logic aren't specified), and the three demo-rendering surfaces (AI Receptionist,
-Chatbot, Website preview) consuming `UnifiedKb` output. Everything else should activate as soon as
-its credentials land — that's what every "PLACEHOLDER_..." value and named env var throughout this
-repo was built to do.
+## Honest final accounting — what's actually still open
+
+Everything above is genuinely code-complete pending credentials/import. What's **not** just a
+credentials gap, listed so it isn't confused with one:
+
+- **The Deals Desk / dialer UI** — no frontend anywhere in this repo actually calls
+  `hopper-request-next.workflow.json`, `dialer-place-call.workflow.json`, `call-wrap-up.workflow.json`,
+  or any of the compliance gates in sequence. Every backend piece those need is built and callable;
+  the softphone/UI layer that would call them in the right order, live, for a real rep, is not. By
+  far the largest remaining piece of work in this whole system.
+- **Deep Dive Research and Front Door Audit as real services** — both are named-placeholder URLs
+  throughout `workflows/phase-1-mvp/` and `phase-4-intelligence-layer/`. The brief names their output
+  *shape* (a score, categories, a report) but not the actual scoring logic/categories themselves —
+  genuine unspecified design work, not something safe to invent here.
+- **The three demo-rendering surfaces** (AI Receptionist, Chatbot preview, Website preview) consuming
+  `UnifiedKb` output — the content exists (`kbDoc.sections`), the rendering surfaces don't.
+- **The live voice-AI bridge for demo extensions** (Phase 5/W5.3's inbound call handler) — can
+  correctly identify which Location's demo was dialed, can't yet connect the caller to a real-time
+  conversational voice agent grounded in that Location's `UnifiedKb`. Flagged explicitly in
+  `phase-5-telnyx-activation/README.md` rather than faked.
+- **Power/3-Line dialing** (multi-simultaneous-line calling) — Phase 5's dialer is Preview-mode,
+  single-line only. The real FTC-style `Abandoned` pacing outcome
+  `pacing-controller.workflow.json` was built to compute can only ever be produced by a multi-line
+  orchestrator this pass doesn't build.
+- **W1.3/W1.5** (Proposal document content, Onboarding Form's real field schema) — both blocked on
+  content/schema decisions the brief doesn't specify, not on code.
+- **Phase 7's actual migration** — the runbook is written
+  (`workflows/phase-7-self-hosted-migration/README.md`); running it is a deliberate, one-time human
+  action sequenced after everything else is stable, not something to trigger from this pass.
+
+Every other named gap throughout this repo — a judgment-call cadence/threshold, an unverified Twenty
+CRM/Telnyx/Stripe payload shape, a credential with no Secrets Store entry yet — is flagged in place,
+in the relevant file's own comments/README, not hidden. That's what "code-complete pending
+credentials" means throughout this accounting: the logic is real and tested against realistic
+assumptions; a live account is what would surface any remaining shape mismatches, not more building.

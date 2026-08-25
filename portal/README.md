@@ -2,7 +2,7 @@
 
 The client-facing portal the brief describes as part of Phase 1's MVP funnel: "Why-the-Audit page →
 Audit report page → Proposal → lightweight inline e-sign → Onboarding Form → Stripe payment link."
-Static HTML pages + three Netlify Functions as the backend — no frontend framework, no build step,
+Static HTML pages + six Netlify Functions as the backend — no frontend framework, no build step,
 matching the brief's "Netlify... unchanged by any of the above, still the hosting target" scope (this
 is a small enough site not to need one).
 
@@ -13,10 +13,16 @@ is a small enough site not to need one).
   `CRM-OBJECT-MODEL.md` — updated this pass, was a single flat score before), each showing that
   site's own score once its `frontDoorAuditStatus` is `Complete`, or a pending state otherwise.
 - `proposal.html` — package/tier selection + the lightweight inline e-sign capture (typed name +
-  checkbox; timestamp and IP are captured **server-side**, not trusted from the browser).
+  checkbox; timestamp and IP are captured **server-side**, not trusted from the browser). Also fires
+  a fire-and-forget "proposal viewed" beacon the moment it renders, feeding the portal-abandonment
+  follow-up workflow (Phase 1).
 - `onboarding.html` — a Stripe Checkout redirect flow (fully functional against Stripe, using
   placeholder keys until real ones exist) plus placeholder onboarding-detail fields that don't
   submit anywhere yet.
+- `documents.html` (Phase 6/W1.7) — PIN-gated access to the client's per-client Drive folder,
+  provisioned automatically post-payment (`onboarding-provisioning.workflow.json`).
+- `support.html` (Phase 6/W6.2) — a support ticket intake form; every submission becomes a
+  `SupportTicket` a human resolves, nothing here auto-replies.
 - `index.html` — redirects to `audit.html`, preserving the `?id=` query string.
 
 Every page is driven by one query param, `?id=<opportunityId>` — the Twenty CRM Opportunity ID,
@@ -52,14 +58,25 @@ behavior is testable without needing a live Netlify environment.
   CRM record once the webhook fires. Tier prices (`lib/createCheckoutSession.ts`) are the brief's
   own numbers (Gold $750 / Platinum $1,650 / Iridium $2,600) — Rhodium is deliberately excluded
   from this generic flow since it's custom-priced, not a fixed amount.
+- **`proposal-viewed`** (`POST /api/proposal-viewed`) — a fire-and-forget beacon (always 200s to the
+  browser regardless of upstream success/failure) forwarding to n8n's `proposal-viewed` webhook,
+  which records the first time a lead actually opens their Proposal page.
+- **`verify-documents-pin`** (`POST /api/verify-documents-pin`) — calls Twenty CRM directly (same
+  pattern as `get-opportunity`), comparing a SHA-256 hash of the submitted PIN against the Company's
+  stored `documentsAccessPinHash` (constant-time comparison) and logging every attempt as an Activity
+  Event, win or lose — "PIN-gated... with an audit log of access," `05 §7/§13`'s W1.7.
+- **`submit-support-ticket`** (`POST /api/submit-support-ticket`) — synchronous (unlike the
+  fire-and-forget beacons above; a support submitter wants confirmation before leaving the page),
+  validates server-side and forwards to n8n's `support-ticket-intake` webhook.
 
 ## What's real vs. placeholder
 
-- **Fully functional, ready for real credentials:** `get-opportunity` and `create-checkout-session`
-  work end to end against Twenty CRM and Stripe respectively — they just need
-  `TWENTY_CRM_API_KEY`/`TWENTY_CRM_BASE_URL` and `STRIPE_SECRET_KEY` set as real Netlify environment
-  variables (see below) instead of the named placeholder fallbacks in `lib/*.ts`. `submit-esign`
-  needs `N8N_ESIGN_WEBHOOK_URL` pointing at a real, deployed n8n instance running that workflow.
+- **Fully functional, ready for real credentials:** `get-opportunity`, `create-checkout-session`,
+  `verify-documents-pin`, and the audit-log write inside it work end to end against Twenty CRM and
+  Stripe — they just need `TWENTY_CRM_API_KEY`/`TWENTY_CRM_BASE_URL` and `STRIPE_SECRET_KEY` set as
+  real Netlify environment variables (see below) instead of the named placeholder fallbacks in
+  `lib/*.ts`. `submit-esign`, `proposal-viewed`, and `submit-support-ticket` each need their own
+  `N8N_..._WEBHOOK_URL` pointing at a real, deployed n8n instance running the matching workflow.
 - **Structural placeholders, not yet real:** the onboarding form's detail fields (business hours,
   contact email) don't submit anywhere — the brief doesn't specify the Onboarding Form's actual
   field schema yet (`W1.5` in `workflows/README.md`). The Proposal page's surrounding copy/terms
@@ -71,17 +88,19 @@ behavior is testable without needing a live Netlify environment.
 
 | Variable | Used by | Falls back to (placeholder) |
 |---|---|---|
-| `TWENTY_CRM_BASE_URL` | `get-opportunity` | empty string (fails clearly, not silently) |
-| `TWENTY_CRM_API_KEY` | `get-opportunity` | `PLACEHOLDER_TWENTY_CRM_API_KEY` |
+| `TWENTY_CRM_BASE_URL` | `get-opportunity`, `verify-documents-pin` | empty string (fails clearly, not silently) |
+| `TWENTY_CRM_API_KEY` | `get-opportunity`, `verify-documents-pin` | `PLACEHOLDER_TWENTY_CRM_API_KEY` |
 | `N8N_ESIGN_WEBHOOK_URL` | `submit-esign` | `PLACEHOLDER_N8N_ESIGN_WEBHOOK_URL` |
+| `N8N_PROPOSAL_VIEWED_WEBHOOK_URL` | `proposal-viewed` | `PLACEHOLDER_N8N_PROPOSAL_VIEWED_WEBHOOK_URL` |
+| `N8N_SUPPORT_TICKET_WEBHOOK_URL` | `submit-support-ticket` | `PLACEHOLDER_N8N_SUPPORT_TICKET_WEBHOOK_URL` |
 | `STRIPE_SECRET_KEY` | `create-checkout-session` | `PLACEHOLDER_STRIPE_SECRET_KEY` |
 
 Same names as the Command Center wizard writes to Cloudflare Secrets Store
 (`command-center/src/vendors.ts`) — `TWENTY_CRM_API_KEY` and `STRIPE_SECRET_KEY` specifically, so
-copying a value from there to a Netlify env var is a rename-free copy. `TWENTY_CRM_BASE_URL` and
-`N8N_ESIGN_WEBHOOK_URL` aren't vendor *secrets* (they're instance URLs), so they're not in the
-wizard's Secrets Store list — set them directly as Netlify env vars once the Oracle box/n8n instance
-exists.
+copying a value from there to a Netlify env var is a rename-free copy. `TWENTY_CRM_BASE_URL` and the
+three `N8N_..._WEBHOOK_URL` variables aren't vendor *secrets* (they're instance/endpoint URLs), so
+they're not in the wizard's Secrets Store list — set them directly as Netlify env vars once the
+Oracle box/n8n instance exists.
 
 ## What's unverified
 

@@ -25,6 +25,12 @@ stand up.
 `02 - Launch Checklist`, not even as a deferred item the way Telnyx and Documenso are. Worth a direct
 answer before this matters for real: is SMS alerting actually wanted, and if so, which provider?
 
+**Also delivers in-app, to Command Center Piece 2's Internal Team Messaging** (`command-center/
+src/messaging/`, built the same pass) — the "Send to Command Center (in-app)" node fires for every
+severity (not critical-only, like SMS), `POST`ing to `/api/alerts` with the `ALERTS_INGEST_SECRET`
+bearer credential. Unlike Google Chat/SMS, this one's a real, tested, already-provisioned target,
+not a named placeholder — see `command-center/README.md`.
+
 **Once imported into a real n8n instance:** note this workflow's assigned ID and update every other
 workflow's `settings.errorWorkflow` field (currently `PLACEHOLDER_ALERT_WORKFLOW_ID` throughout this
 whole library) to point at it — that's a one-time manual step after import, not something fixable

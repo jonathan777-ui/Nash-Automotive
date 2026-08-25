@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Piece 1: persistent Operations Command Center. Checkpoint 1 scope only — the Cloudflare Access auth gate. The credential form and Secrets Store writes are checkpoint 2.",
+  "description": "Piece 1 (checkpoints 1-3, credential wizard) + Piece 2's Internal Team Messaging (channels, @mentions, CRM comment threads, in-app alerts) of the persistent Operations Command Center.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "jose": "^5.9.6"
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
     "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
     "wrangler": "^3.99.0"
   }
 }

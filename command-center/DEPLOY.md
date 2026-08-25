@@ -167,3 +167,33 @@ matching the GitHub/Netlify pattern.
 Once you've gone through the full checklist in one session (per what you said you'd do), tell me
 which rows landed cleanly and which didn't — including whether any of the three unconfirmed CLI
 rows actually turned out to need the manual-paste path instead.
+
+## 11. Verify Piece 2 — Internal Team Messaging
+
+No extra setup needed for the D1 side — `MESSAGING_DB` is already provisioned (real database ID
+already in `wrangler.toml`, same as `STATUS`), so `npx wrangler deploy` picks it up automatically.
+One thing you do need to do:
+
+```
+wrangler secret put ALERTS_INGEST_SECRET
+```
+
+Generate a random value for it (e.g. `openssl rand -hex 32`) — this is what n8n's alert-dispatcher
+workflow (`workflows/phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`) authenticates
+to `POST /api/alerts` with, so the same value needs to go into n8n as well (that workflow's
+"Command Center Alerts Ingest" credential).
+
+**Verify:**
+1. Visit `/messaging` through Access — create a channel, post a message with an `@mention`, confirm
+   it renders (the mention highlighted, the message showing up without a manual page refresh within
+   ~5 seconds).
+2. Visit `/messaging/thread?opportunityId=test-123` — post a comment, confirm it persists on reload.
+3. `curl -X POST https://<your-worker>/api/alerts -H "Authorization: Bearer <wrong>" -d '{}'` should
+   `401`. With the correct secret and a valid body (`{"severity":"info","source":"test","message":"hi"}`)
+   it should `200`, and the alert should show up in `/messaging`'s sidebar.
+
+If any of this doesn't work as expected, tell me what happened — the D1 query patterns
+(`src/messaging/db.ts`) were written against D1's documented API but not exercised against the real
+provisioned database from this sandbox (no way to run a live Worker here), so a live mismatch is
+plausible even though the schema itself is confirmed applied (queried directly via the Cloudflare
+MCP tools during this build).

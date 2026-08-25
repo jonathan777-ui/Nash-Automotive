@@ -98,7 +98,7 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.1 | Unified calendar write-through | Any of: dialer, Demo Dashboard, Deals Desk scheduling an event | Auto (internal, reversible) | Documented only |
 | W2.2 | Automated nurture cadence | Schedule (cold-opportunity check) | **Human gate** — drafts only, human approves/sends | Documented only |
 | W2.3 | Post-onboarding CX touch cadence | Schedule, keyed off Stage = Live Client + tenure | Auto to draft/schedule the touch; send policy per W2.2's gate | Documented only |
-| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat (per Jonathan's request, swapped from an earlier Slack version) + SMS on critical; SMS still has no vendor in `02 - Launch Checklist` — see that folder's README. |
+| W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat + Command Center in-app (both real) + SMS on critical (still a placeholder — no provider in `02 - Launch Checklist`) — see that folder's README. |
 | W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
 
@@ -251,19 +251,27 @@ standing rule for anything written in this library from now on:
   alongside the CRM object model specifically because DNC status has to be checkable *from* the
   Opportunity record, not just enforced at the dialer.
 
-## Internal Team Messaging (05 §14) — Command Center Piece 2, not urgent
+## Internal Team Messaging (05 §14) — Command Center Piece 2, built
 
 New in brief v2, explicitly scoped as part of Command Center **Piece 2** (channel-based chat,
 @mentions, in-app delivery of the same alerts as W2.4, comment threads attached to CRM records) —
 "not a Slack replacement... separate, for team-to-team communication that lives inside the same tool
 as everything else" (the brief's own words, written before the switch to Google Chat below). The
 external channel W2.4 dispatches system alerts to — Google Chat, per Jonathan's request — keeps
-receiving them regardless; this is a distinct, in-app surface on top.
+receiving them regardless; this is a distinct, in-app surface on top, and W2.4 now delivers to both
+(see `alert-dispatcher.workflow.json`'s "Send to Command Center (in-app)" node).
 
-**Not a Phase 1 blocker and not scaffolded** — the brief itself sequences this after Piece 1 (the
-wizard) ships, same as pipeline reporting (W6.1, also folded into Piece 2). Noted here so it isn't
-lost, and noted in `command-center/README.md` as now-explicitly-in-scope for whenever Piece 2 work
-starts.
+**Built this pass, ahead of the brief's own "not urgent" sequencing** — `command-center/src/messaging/`
+(channels/messages/@mentions, comment threads keyed by `opportunityId`, an `/api/alerts` ingest
+endpoint), backed by a real, already-provisioned Cloudflare D1 database (not a placeholder — same
+"actually create it with the live tools available" treatment the `STATUS` KV namespace got in
+Piece 1). Real-time delivery is 5-second polling, not a WebSocket/Durable Object — simple, testable,
+and enough for a "not urgent" internal tool; noted as a natural v2 upgrade, not built now. Full
+detail: `command-center/README.md`'s "Piece 2 — Internal Team Messaging" section and
+`command-center/DEPLOY.md` step 11.
+
+Pipeline visibility/reporting (the rest of Piece 2, absorbing W6.1) remains not started — no
+brief-v2 urgency behind it the way messaging had.
 
 ---
 
@@ -288,7 +296,8 @@ item. Worth resolving before that workflow matters for real; see that folder's R
 
 ## How this library relates to the rest of the repo
 
-- `command-center/` — Piece 1, gathers these credentials in the first place. Updated for v2: Stripe
+- `command-center/` — Piece 1, gathers these credentials in the first place; also now Piece 2's
+  Internal Team Messaging (`src/messaging/`, built this pass — see below). Updated for v2: Stripe
   added to the vendor checklist, Documenso removed.
 - `src/server/` — Piece 3, the demo generator W1.2 calls into directly. Unaffected by v2 — none of
   the changes (Front Door Audit, e-sign, Stripe, CRM Architecture) touch the KB demo generator's own
@@ -304,7 +313,7 @@ item. Worth resolving before that workflow matters for real; see that folder's R
   (W4.3's referral thresholds), it's a named placeholder rather than an invented default, same
   pattern as every credential in this repo.
 - Everything else here (Deep Dive Research, Front Door Audit, the Demo Dashboard/CRM write targets,
-  nurture/CX content, health scoring, Telnyx activation, Internal Team Messaging, the dialer hopper
-  itself) is **new scope this library surfaces but doesn't build** — cataloged so nothing named in
-  the roadmap gets silently lost, with each "Documented only" / "Not started" entry stating exactly
-  what's blocking it from being scaffolded for real.
+  nurture/CX content, health scoring, Telnyx activation, the dialer hopper itself) is **new scope
+  this library surfaces but doesn't build** — cataloged so nothing named in the roadmap gets
+  silently lost, with each "Documented only" / "Not started" entry stating exactly what's blocking
+  it from being scaffolded for real.

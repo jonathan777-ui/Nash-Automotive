@@ -26,3 +26,19 @@ CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
 [[kv_namespaces]]
 binding = "STATUS"
 id = "c2f4d507f9c64a77b3d7c28b4e4b83c9"
+
+# Piece 2 — Internal Team Messaging (05 §14): channels/messages/@mentions, comment threads on CRM
+# records, and in-app alert delivery. Also real, not a placeholder — provisioned directly during
+# this build (mcp__Cloudflare_Developer_Platform__d1_database_create), schema applied via
+# d1_database_query. See src/messaging/ and command-center/README.md.
+[[d1_databases]]
+binding = "MESSAGING_DB"
+database_name = "orbit-command-center-messaging"
+database_id = "9758e387-cbe4-4120-93ad-f033817e4822"
+
+# ALERTS_INGEST_SECRET is NOT here on purpose, same reasoning as CF_API_TOKEN above: it's the
+# shared secret n8n's alert-dispatcher workflow uses to authenticate to POST /api/alerts (a
+# machine-to-machine route that can't go through interactive Cloudflare Access), so it must be a
+# plain Wrangler secret (`wrangler secret put ALERTS_INGEST_SECRET`) — generate a random value,
+# put the same one in n8n's environment as ALERTS_INGEST_SECRET. Until it's set, /api/alerts
+# rejects every request rather than silently accepting unauthenticated writes (see index.ts).

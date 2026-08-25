@@ -3,11 +3,25 @@ import { createSecret, type SecretsStoreEnv } from './secretsStore.js';
 import { VENDORS, type VendorDef } from './vendors.js';
 import { escapeHtml } from './util.js';
 import { getAllStatuses, markConnected, type VendorStatus } from './status.js';
+import {
+  handleAlertsIngest,
+  handleCreateChannel,
+  handleMessagingPage,
+  handlePostComment,
+  handlePostMessage,
+  handleThreadPage,
+} from './messaging/routes.js';
 
 export interface Env extends SecretsStoreEnv {
   TEAM_DOMAIN: string;
   POLICY_AUD: string;
   STATUS: KVNamespace;
+  /** Real D1 binding — see wrangler.toml. Piece 2's Internal Team Messaging (05 §14). */
+  MESSAGING_DB: D1Database;
+  /** A plain Wrangler secret (`wrangler secret put ALERTS_INGEST_SECRET`), same treatment as
+   * CF_API_TOKEN — n8n's alert-dispatcher workflow authenticates to /api/alerts with this,
+   * since it can't complete an interactive Cloudflare Access login. */
+  ALERTS_INGEST_SECRET: string;
 }
 
 const PLACEHOLDER_VALUES = new Set([
@@ -72,16 +86,38 @@ async function verifyAccess(request: Request, env: Env): Promise<AccessResult> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Checked BEFORE Access verification — this is a machine-to-machine route (n8n's
+    // alert-dispatcher workflow), which can't complete an interactive Access login. Every other
+    // route below is a human-facing browser session and stays behind Access.
+    if (request.method === 'POST' && url.pathname === '/api/alerts') {
+      return handleAlertsIngestAuthed(request, env);
+    }
+
     const access = await verifyAccess(request, env);
     if (!access.ok) return access.response;
-
-    const url = new URL(request.url);
 
     if (request.method === 'POST' && url.pathname === '/secrets') {
       return handleSecretsSubmit(request, env);
     }
     if (request.method === 'POST' && url.pathname === '/status') {
       return handleStatusSubmit(request, env);
+    }
+    if (request.method === 'GET' && url.pathname === '/messaging') {
+      return handleMessagingPage(request, env.MESSAGING_DB);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/channels') {
+      return handleCreateChannel(request, env.MESSAGING_DB);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/messages') {
+      return handlePostMessage(request, env.MESSAGING_DB, access.email);
+    }
+    if (request.method === 'GET' && url.pathname === '/messaging/thread') {
+      return handleThreadPage(request, env.MESSAGING_DB);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/threads/comments') {
+      return handlePostComment(request, env.MESSAGING_DB, access.email);
     }
     if (request.method === 'GET' && url.pathname === '/') {
       const statuses = await getAllStatuses(env.STATUS, VENDORS.map((v) => v.id));
@@ -93,6 +129,18 @@ export default {
     return new Response('Not found', { status: 404 });
   },
 };
+
+export async function handleAlertsIngestAuthed(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get('Authorization') ?? '';
+  const expected = `Bearer ${env.ALERTS_INGEST_SECRET}`;
+  if (!env.ALERTS_INGEST_SECRET || env.ALERTS_INGEST_SECRET === 'PLACEHOLDER_ALERTS_INGEST_SECRET' || authHeader !== expected) {
+    return new Response(JSON.stringify({ ok: false, reason: 'Unauthorized.' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  return handleAlertsIngest(request, env.MESSAGING_DB);
+}
 
 function redirectWith(request: Request, params: Record<string, string>): Response {
   const redirectUrl = new URL('/', request.url);
@@ -242,7 +290,8 @@ function renderPage(email: string, params: URLSearchParams, statuses: Map<string
   <div class="card">
     <span class="badge">Checkpoint 3 · Full vendor checklist</span>
     <h1>Orbit Command Center</h1>
-    <p class="sub">Signed in as ${escapeHtml(email)}. <span class="progress">${connectedCount}/${VENDORS.length} connected.</span></p>
+    <p class="sub">Signed in as ${escapeHtml(email)}. <span class="progress">${connectedCount}/${VENDORS.length} connected.</span>
+      &middot; <a href="/messaging" style="color:#7fe0ff">Team messaging (Piece 2)</a></p>
     ${banner}
 
     <h2>CLI-auth — run locally, then confirm here</h2>

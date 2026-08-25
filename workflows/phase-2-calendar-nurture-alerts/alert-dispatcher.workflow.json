@@ -70,11 +70,38 @@
         "options": {}
       },
       "notes": "Still a real gap, unlike Google Chat: no SMS provider (Twilio or otherwise) appears ANYWHERE in 02 - Launch Checklist - not even as a deferred/later item the way Telnyx and Documenso are. If SMS alerts are actually wanted for go-live, a provider account needs adding to the credential set; until then this stays a named placeholder with no real vendor decided, not just no key yet."
+    },
+    {
+      "id": "9da21190-5429-4ad9-aed8-7e84d0039332",
+      "name": "Send to Command Center (in-app)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, -160],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.COMMAND_CENTER_URL }}/api/alerts",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: $json.body.severity, source: $json.body.source, message: $json.body.message }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Command Center Alerts Ingest"
+        }
+      },
+      "notes": "Real, built endpoint (command-center/src/messaging/, Piece 2's Internal Team Messaging) - not a placeholder like Google Chat/SMS. Fires for every severity (unlike SMS, which is critical-only) since the in-app alerts panel is meant to show the full history, not just the urgent ones. The credential here is the ALERTS_INGEST_SECRET plain Wrangler secret set on the Command Center Worker (see command-center/wrangler.toml) - configure the SAME value as this n8n credential's bearer token. COMMAND_CENTER_URL is the deployed Worker's URL (e.g. https://orbit-command-center.<subdomain>.workers.dev, or a custom domain once one's attached)."
     }
   ],
   "connections": {
     "Alert dispatch webhook": {
-      "main": [[{ "node": "Critical?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          { "node": "Critical?", "type": "main", "index": 0 },
+          { "node": "Send to Command Center (in-app)", "type": "main", "index": 0 }
+        ]
+      ]
     },
     "Critical?": {
       "main": [

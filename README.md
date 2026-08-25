@@ -17,8 +17,10 @@ the project brief's build order:
   (lead intake, CRM writes, alerts, nurture, the dialer, and everything else the brief names). See
   `workflows/README.md`.
 
-Piece 2 (the rest of the Command Center — pipeline visibility, system health, internal team
-messaging) is lower priority and grows incrementally after Piece 1 ships; not started.
+Piece 2 (the rest of the Command Center — pipeline visibility, system health) is lower priority and
+grows incrementally after Piece 1 ships; mostly not started, except **Internal Team Messaging**
+(channels, @mentions, CRM comment threads, in-app alerts — `command-center/src/messaging/`), built
+ahead of that sequencing once asked, backed by a real, already-provisioned Cloudflare D1 database.
 
 **Brief v2 update (checked against everything already built, adjusted where affected):** Front Door
 Audit added as a real, parallel-running piece; MVP e-sign is now a lightweight inline capture, not

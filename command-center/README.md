@@ -82,14 +82,47 @@ mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are sti
   `uncertain` fields and their comments in `src/vendors.ts` for specifics — worth checking against
   reality during the checkpoint-3 walkthrough rather than assuming the guess is right.
 
-## Explicitly not in scope
+## Piece 2 — Internal Team Messaging (05 §14), built this pass
 
-- Piece 2 (the rest of the Command Center — pipeline visibility/reporting, system health, and, per
-  brief v2's new `05 - Exhaustive Workflow & Automation Library` §14, **Internal Team Messaging**:
-  channel-based chat, @mentions, in-app delivery of the same alerts Section 11 sends to Google Chat, and
-  comment threads attached directly to CRM records) — lower priority, grows incrementally after the
-  wizard ships; not started. See `workflows/README.md`'s "Internal Team Messaging" section for the
-  full brief-v2 detail.
+Per brief v2's new `05 - Exhaustive Workflow & Automation Library` §14: channel-based chat,
+@mentions, comment threads attached to CRM records, and in-app delivery of the same alerts
+`workflows/phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json` sends to Google Chat.
+Explicitly scoped as lower-priority/not-urgent in the brief — built anyway once asked, on the same
+"code it now, activate on real credentials" discipline as everything else here.
+
+- `src/messaging/db.ts` — all reads/writes against a **real, already-provisioned Cloudflare D1
+  database** (`orbit-command-center-messaging`, created directly via the Cloudflare MCP tools during
+  this build, same as the `STATUS` KV namespace was — not a placeholder). Schema: `channels`,
+  `messages`, `mentions`, `comment_threads`, `comments`, `alerts`.
+- `src/messaging/mentions.ts` — parses `@handle` mentions out of message/comment text. Not resolved
+  against a real Workspace directory (none exists in this system yet) — a mention is stored as the
+  literal typed handle; matching it to a real person's notification is follow-up work.
+- `src/messaging/routes.ts` — the HTTP handlers + server-rendered HTML (channel list, message
+  thread with lightweight polling for a "feels live" update without a full page reload, a comment
+  thread page keyed by `?opportunityId=`, and a recent-alerts panel).
+- New routes wired into `src/index.ts`: `GET/POST /messaging`, `GET/POST /messaging/thread`,
+  and `POST /api/alerts`. That last one is deliberately **not** behind Cloudflare Access — n8n's
+  alert-dispatcher workflow calls it machine-to-machine and can't complete an interactive Access
+  login, so it's checked *before* the Access gate and authenticated with its own shared secret
+  (`ALERTS_INGEST_SECRET`, a plain Wrangler secret like `CF_API_TOKEN` — never in Secrets Store or
+  `wrangler.toml`, since that's the credential this Worker uses to *receive* pushes, not one a human
+  submits through the form). Until that secret is set for real, `/api/alerts` returns 401 on every
+  request rather than silently accepting unauthenticated writes.
+- 19 tests (`command-center/npm test`) against a fake D1 (records calls, returns queued results —
+  same pattern as the `fakeClient()` mocks used for Anthropic calls elsewhere in this repo), plus
+  the alerts-ingest auth logic specifically (rejects a missing/wrong/placeholder secret).
+
+**Not built:** real-time push (WebSocket via a Durable Object) — the message/comment views poll
+every 5s instead, which is simple, testable, and good enough for a "not urgent" internal tool; a
+natural v2 upgrade if it ever needs to feel more instant. Also not built: wiring an actual link to
+a comment thread onto a Twenty CRM Opportunity Card (per §13's "status badge + button opening the
+actual tool in a new tab" pattern) — the thread page itself is ready at a stable URL
+(`/messaging/thread?opportunityId=...`), but nothing yet writes that URL onto the Opportunity; a
+one-line addition to `workflows/phase-1-mvp/lead-intake-to-demo-dashboard.workflow.json` once
+that's wanted.
+
+Pipeline visibility/reporting and system health (the rest of Piece 2, absorbing Phase 6's W6.1)
+remain not started — lower priority, no brief-v2 urgency behind them the way messaging had.
 
 ## Once deployed
 

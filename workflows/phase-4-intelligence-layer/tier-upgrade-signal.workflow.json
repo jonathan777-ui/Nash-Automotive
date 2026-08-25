@@ -1,0 +1,79 @@
+{
+  "name": "Orbit AI - Phase 4 - Tier upgrade signal (W4.2)",
+  "nodes": [
+    {
+      "id": "15009d75-d98f-4ea2-960b-50e89a64c5f2",
+      "name": "Every day at 6:30am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "30 6 * * *" }]
+        }
+      },
+      "notes": "Runs 30 minutes after health-scoring.workflow.json (W4.1, 6am) so engagementScore/currentTier are fresh for today before this reads them. 05 Section 9's table: 'Tier upgrade/upsell signal - off W4.1's output - Auto to flag/draft; human closes the upsell.'"
+    },
+    {
+      "id": "7812a33b-152b-4a48-b0f1-b35d35103d11",
+      "name": "Fetch LiveClient Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Fetches the whole LiveClient set and filters client-side (next node) rather than a numeric >= filter query - Twenty CRM's REST filter support for numeric comparisons isn't confirmed, same discipline as missed-follow-up-check.workflow.json's own client-side filter."
+    },
+    {
+      "id": "44bbdb57-7148-4d9c-b821-4dc10dd4f65f",
+      "name": "Filter upgrade-eligible",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "parameters": {
+        "jsCode": "// Threshold is this pass's own judgment call (health-scoring.workflow.json's formula caps at 100;\n// 75 is 'clearly healthy, not just adequate'), not brief-specified - same flagged-judgment-call\n// treatment as the scoring formula itself.\nconst SCORE_THRESHOLD = 75;\n\nfunction asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.companies)) return json.data.companies;\n  if (json && Array.isArray(json.companies)) return json.companies;\n  return [];\n}\n\nconst eligible = $input.all().flatMap(asArray).filter((c) => {\n  // IRIDIUM TIER PROTECTION, built by construction (05 Section 9: 'untouched by automated\n  // pipeline changes; requires human involvement + dedicated training first') - excluded here\n  // rather than relying on every future caller remembering to check, per phase-4/README.md's own\n  // 'worth building tier-check guards... so Iridium accounts are excluded by construction' note\n  // from an earlier pass. Also excludes anyone already Iridium since there's no higher tier to\n  // flag an upgrade toward.\n  if (c.currentTier === 'Iridium') return false;\n  return (c.engagementScore || 0) >= SCORE_THRESHOLD;\n});\n\nreturn eligible.map((c) => ({ json: c }));"
+      }
+    },
+    {
+      "id": "132ed05d-7025-4617-8324-2cad47d004d1",
+      "name": "Alert: tier-upgrade signal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'tier-upgrade-signal', message: $json.name + ' is upgrade-eligible - engagement score ' + $json.engagementScore + ', current tier ' + $json.currentTier + '. Flag for a rep to pursue the upsell.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/company/' + $json.id }) }}",
+        "options": {}
+      },
+      "notes": "Auto-flags only - per the automation risk boundary and the table's own Gate column ('Auto to flag/draft; human closes the upsell'), this never contacts the client itself, it alerts a rep to go pursue it. Routes to #cx-retention (alertRouting.ts matches sources containing 'tier-upgrade')."
+    }
+  ],
+  "connections": {
+    "Every day at 6:30am": {
+      "main": [[{ "node": "Fetch LiveClient Companies", "type": "main", "index": 0 }]]
+    },
+    "Fetch LiveClient Companies": {
+      "main": [[{ "node": "Filter upgrade-eligible", "type": "main", "index": 0 }]]
+    },
+    "Filter upgrade-eligible": {
+      "main": [[{ "node": "Alert: tier-upgrade signal", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

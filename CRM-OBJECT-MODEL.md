@@ -199,9 +199,12 @@ tier-upgrade signal, referral trigger, churn, Front Door Audit refresh) operates
 Opportunity — see the load-bearing distinction above.
 
 - Fields: `id`, `name`, `organizationId` (nullable), `status` (`LiveClient` and others as post-sale
-  states get built out), `liveClientSince`, `lastCxTouchAt`/`cxWave`/`lastCxDraftText` (new this
-  pass — `cx-cadence.workflow.json`'s own state, the 7/30/60/90-day-then-quarterly cadence `05 §9`
-  gives explicitly).
+  states get built out), `liveClientSince`, `lastCxTouchAt`/`cxWave`/`lastCxDraftText`
+  (`cx-cadence.workflow.json`'s own state, the 7/30/60/90-day-then-quarterly cadence `05 §9` gives
+  explicitly), `engagementScore`/`currentTier` (new this pass — `health-scoring.workflow.json`'s
+  own output, a judgment-call formula since `05 §9` names "health/usage scoring" as a heading with
+  no formula given; see that workflow's own notes for exactly what it's built from and why it
+  deliberately avoids faking a usage/telemetry signal this repo has no real pipeline for).
 - Assumed REST: `/rest/companies`, `/rest/companies/{id}`.
 
 ### Organization

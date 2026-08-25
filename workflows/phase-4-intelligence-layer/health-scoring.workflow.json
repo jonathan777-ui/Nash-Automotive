@@ -1,0 +1,107 @@
+{
+  "name": "Orbit AI - Phase 4 - Client health/usage scoring (W4.1)",
+  "nodes": [
+    {
+      "id": "403a24b5-9871-4ba6-954c-e35d4b1414e6",
+      "name": "Every day at 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1400, 0],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 6 * * *" }]
+        }
+      },
+      "notes": "05 Section 9 names 'health/usage scoring' as a heading with no formula given - the actual weighting was undecided since the earliest pass of this library, blocking W4.1/W4.2 from being scaffolded at all. Built now per 06's 'left to Claude Code's judgment' framing for anything the source docs don't resolve - the formula below is this pass's own reasonable design, flagged as a judgment call throughout, not presented as brief-specified. Runs before referral-trigger.workflow.json (W4.3) would need engagementScore, and before tier-upgrade-signal.workflow.json (W4.2) needs currentTier/engagementScore."
+    },
+    {
+      "id": "ccf371f8-5af2-480f-a6f4-881031df390b",
+      "name": "Fetch LiveClient Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies?filter=status[eq]:LiveClient",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same query cx-cadence.workflow.json uses - post-sale scoring belongs on Company, per the load-bearing pre-sale/post-sale distinction every post-sale automation in this repo already follows."
+    },
+    {
+      "id": "ada43c97-80d1-4b83-b11a-a7d2230a3c63",
+      "name": "Fetch active Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts?filter=companyId[eq]:{{ $json.id }},status[eq]:Active",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Needs the Contract for tier + locationIds count - Company itself doesn't carry either. Runs once per Company (n8n's default per-item HTTP execution)."
+    },
+    {
+      "id": "20a1a09b-e36c-45a1-a880-27e565c31b24",
+      "name": "Compute engagement score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 0],
+      "parameters": {
+        "jsCode": "// JUDGMENT-CALL FORMULA, not brief-specified - flagged prominently, see the trigger node's own\n// notes. Built from signals this repo's object model ACTUALLY HAS, not invented telemetry:\n// tenure (longer without churning = healthier), Location count (more sites under contract =\n// stickier), and contract tier (a proxy for account size/investment). Deliberately does NOT use\n// 'usage' in the literal sense (call volume through the client's deployed AI receptionist/chatbot)\n// - no telemetry pipeline from a deployed instance back into this CRM exists anywhere in this\n// repo, so faking a usage signal from data that isn't real would be worse than omitting it. A real\n// usage-based score needs that pipeline built first, not guessed at here.\nconst TENURE_MAX_POINTS = 40;\nconst TENURE_MAX_DAYS = 400; // ~13 months to hit the tenure cap\nconst LOCATION_MAX_POINTS = 30;\nconst LOCATION_POINTS_PER_SITE = 10; // caps at 3 Locations\nconst TIER_POINTS = { Gold: 10, Platinum: 20, Iridium: 30 };\n\nfunction asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.contracts)) return json.data.contracts;\n  if (json && Array.isArray(json.contracts)) return json.contracts;\n  return [];\n}\n\nconst company = $('Fetch LiveClient Companies').item.json;\nconst contracts = $input.all().flatMap(asArray);\nconst contract = contracts[0]; // 'Active' filter should return at most one; first is a reasonable fallback if the filter query itself isn't honored (unconfirmed REST shape, same caveat as everywhere else).\n\nconst daysSinceLiveClient = company.liveClientSince\n  ? (Date.now() - new Date(company.liveClientSince).getTime()) / 86400000\n  : 0;\nconst tenureScore = Math.min(TENURE_MAX_POINTS, (daysSinceLiveClient / TENURE_MAX_DAYS) * TENURE_MAX_POINTS);\n\nconst locationCount = contract?.locationIds?.length || 0;\nconst locationScore = Math.min(LOCATION_MAX_POINTS, locationCount * LOCATION_POINTS_PER_SITE);\n\nconst tier = contract?.tier || null;\nconst tierScore = TIER_POINTS[tier] || 0;\n\nconst engagementScore = Math.round(tenureScore + locationScore + tierScore);\n\nreturn [{ json: { companyId: company.id, engagementScore, currentTier: tier } }];"
+      }
+    },
+    {
+      "id": "f776fb6b-a44d-4810-bea8-984e6573cf50",
+      "name": "Update Company score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/companies/{{ $json.companyId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ engagementScore: $json.engagementScore, currentTier: $json.currentTier }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "engagementScore was already a field referral-trigger.workflow.json (W4.3) expected to exist but nothing wrote - this is what finally makes that workflow's filter mean something instead of matching zero rows forever. currentTier is written here too (not re-derived by every downstream consumer) so tier-upgrade-signal.workflow.json (W4.2) doesn't need a second Contract fetch."
+    }
+  ],
+  "connections": {
+    "Every day at 6am": {
+      "main": [[{ "node": "Fetch LiveClient Companies", "type": "main", "index": 0 }]]
+    },
+    "Fetch LiveClient Companies": {
+      "main": [[{ "node": "Fetch active Contract", "type": "main", "index": 0 }]]
+    },
+    "Fetch active Contract": {
+      "main": [[{ "node": "Compute engagement score", "type": "main", "index": 0 }]]
+    },
+    "Compute engagement score": {
+      "main": [[{ "node": "Update Company score", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

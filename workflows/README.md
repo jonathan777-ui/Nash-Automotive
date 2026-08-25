@@ -235,32 +235,28 @@ timeline, and fires W3.4 fire-and-forget for AI QA only when a transcript is act
 
 | ID | Name | Trigger | Gate | Status |
 |---|---|---|---|---|
-| W4.1 | Client health/usage scoring | Schedule or usage-event | Auto (internal scoring) | Documented only |
-| W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | Documented only |
-| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json`. **Object model migration (this pass):** moved from querying Opportunities (`stage=LiveClient`, a state Opportunities no longer reach) to querying Companies (`status=LiveClient`) — this was a real bug, not a style fix; see the CRM Architecture section below. |
+| W4.1 | Client health/usage scoring | Schedule or usage-event | Auto (internal scoring) | **Scaffolded** — `phase-4-intelligence-layer/health-scoring.workflow.json` |
+| W4.2 | Tier upgrade/upsell signal | Off W4.1's output | Auto to flag/draft; human closes the upsell | **Scaffolded** — `phase-4-intelligence-layer/tier-upgrade-signal.workflow.json` |
+| W4.3 | Referral trigger | Off tenure + engagement signal | Auto to flag; **human gate** on the actual outreach (external send) | **Scaffolded**, with named-placeholder thresholds (real numbers undecided) — `phase-4-intelligence-layer/referral-trigger.workflow.json`. **Object model migration:** moved from querying Opportunities (`stage=LiveClient`, a state Opportunities no longer reach) to querying Companies (`status=LiveClient`) — this was a real bug, not a style fix; see the CRM Architecture section below. |
 | W4.4 | AI employee (extends AI Activity Summary) | Various | **Human gate** per the brief's AI-employee scope: auto-execute reversible/internal, human gate on external-send/billing/irreversible | Documented only |
 | W4.5 | Front Door Audit refresh | Schedule, Stage = Live Client | Auto (internal — produces a retention/upsell proof point, not itself an external send) | Documented only |
 | W4.6 | Loss-reason capture | Opportunity marked Lost | Auto (internal capture) | **Scaffolded** — `phase-4-intelligence-layer/loss-reason-capture.workflow.json` |
 | W4.7 | Opening-line conversion tracking | Deal outcome, keyed to Deep Dive's recommended opening | Auto (internal analytics) | Documented only |
 
-**W4.3 and W4.6 scaffolded this pass** — see `phase-4-intelligence-layer/README.md` for both,
-including W4.3's named-placeholder thresholds and its dependency on W4.1 (not built) for the
-`engagementScore` field it filters on.
+**W4.1/W4.2 built this pass** — see `phase-4-intelligence-layer/README.md` for the full detail: a
+health/usage-scoring formula (a judgment call, not brief-specified — `05 §9` names the heading with
+no formula) built honestly from signals this repo's object model actually has, since no telemetry
+pipeline exists anywhere here from a deployed client instance back into the CRM. Iridium tier
+protection is a hard filter in `tier-upgrade-signal.workflow.json`'s own code, not left as a
+convention for a future workflow to remember. **W4.3's `engagementScore` dependency is resolved** —
+it now reads real data W4.1 writes daily, not nothing.
 
-Still not scaffolded: W4.1's scoring formula (which usage signals, what weighting) isn't decided —
-building it now would mean inventing the formula, not encoding a specified one. W4.2 depends on
-W4.1. W4.4 references "the existing AI Activity Summary automation," which isn't present in this
-Drive folder or this repo — worth locating before extending it. W4.5/W4.7 are each blocked on
-something upstream that doesn't exist yet, not on an undecided design: W4.5 needs the Front Door
-Audit service itself first (not built — see Phase 1); W4.7 needs Deep Dive Research's opening-line
-recommendation to actually be a trackable, ID'd field on the Opportunity, which depends on Deep Dive
-Research's own contract (also not built — see Phase 1).
-
-**Iridium tier protection (05 §9, policy note, not a workflow):** the top service tier is explicitly
-carved out of every automated pipeline change here — "untouched by automated pipeline changes;
-requires human involvement + dedicated training first." Worth building tier-check guards into W4.1/
-W4.2 (health scoring, upsell signals) once those exist, so Iridium accounts are excluded by
-construction rather than by convention.
+W4.4 references "the existing AI Activity Summary automation," which isn't present in this Drive
+folder or this repo — worth locating before extending it. W4.5/W4.7 are each blocked on something
+upstream that doesn't exist yet, not on an undecided design: W4.5 needs the Front Door Audit service
+itself first (not built — see Phase 1); W4.7 needs Deep Dive Research's opening-line recommendation
+to actually be a trackable, ID'd field on the Opportunity, which depends on Deep Dive Research's own
+contract (also not built — see Phase 1).
 
 ## Phase 5 — Telnyx Activation
 

@@ -1,6 +1,25 @@
 # Phase 4 — Intelligence Layer (partial)
 
-Two of Phase 4's seven catalog entries scaffolded this pass.
+Four of Phase 4's seven catalog entries scaffolded so far — W4.1/W4.2 added this pass.
+
+## W4.1 — `health-scoring.workflow.json` + W4.2 — `tier-upgrade-signal.workflow.json`
+
+`05 §9` names "health/usage scoring" as a heading with no formula given — the reason these stayed
+"documented only" since the earliest pass of this library. Built now per `06`'s "left to Claude
+Code's judgment" framing: **the scoring formula is this pass's own design, flagged as a judgment
+call throughout**, built from signals this repo's object model actually has (tenure, active Location
+count, contract tier) rather than a fabricated "usage" number — no telemetry pipeline exists
+anywhere in this repo from a deployed client's AI receptionist/chatbot back into the CRM, so faking
+that signal would be worse than the honest gap of not having it. `engagementScore`/`currentTier`
+write onto Company daily; `tier-upgrade-signal.workflow.json` reads them 30 minutes later and
+auto-flags (never contacts the client — per the automation risk boundary, a rep closes the upsell)
+any Company scoring ≥75 that isn't already Iridium. **Iridium tier protection is built by
+construction here**, not left to convention — `05 §9`'s "untouched by automated pipeline changes"
+rule is a hard filter in the code, not a comment reminding a future maintainer to add one.
+
+**Unblocks W4.3 for real:** `referral-trigger.workflow.json` has read `engagementScore` since an
+earlier pass but had nothing real to filter on until now — this is what makes that query return
+actual rows instead of silently matching nothing.
 
 ## W4.6 — `loss-reason-capture.workflow.json`
 
@@ -43,8 +62,6 @@ human-gated, so this workflow deliberately stops short of drafting or sending an
 
 ## Still documented-only
 
-W4.1 (health scoring — formula undecided), W4.2 (depends on W4.1), W4.4 (AI employee — broad,
-references an automation not present in this repo), W4.5 (Front Door Audit refresh — depends on that
-service existing, not built), W4.7 (opening-line tracking — depends on Deep Dive Research's contract,
-not built). See `workflows/README.md` for the full Phase 4 catalog including the Iridium
-tier-protection policy note.
+W4.4 (AI employee — broad, references an automation not present in this repo), W4.5 (Front Door
+Audit refresh — depends on that service existing, not built), W4.7 (opening-line tracking — depends
+on Deep Dive Research's contract, not built). See `workflows/README.md` for the full Phase 4 catalog.

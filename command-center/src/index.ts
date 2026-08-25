@@ -4,6 +4,7 @@ import { VENDORS, type VendorDef } from './vendors.js';
 import { escapeHtml } from './util.js';
 import { getAllStatuses, markConnected, type VendorStatus } from './status.js';
 import {
+  handleAcknowledgeAlert,
   handleAlertsIngest,
   handleCreateChannel,
   handleMessagingPage,
@@ -106,6 +107,9 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/messaging') {
       return handleMessagingPage(request, env.MESSAGING_DB);
+    }
+    if (request.method === 'POST' && url.pathname === '/messaging/alerts/acknowledge') {
+      return handleAcknowledgeAlert(request, env.MESSAGING_DB, access.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/channels') {
       return handleCreateChannel(request, env.MESSAGING_DB);

@@ -191,8 +191,18 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
    it persists on reload. Try `subjectType=location` too — threads are keyed by (subjectType,
    subjectId) together, so the same id under a different subject type is a different thread.
 3. `curl -X POST https://<your-worker>/api/alerts -H "Authorization: Bearer <wrong>" -d '{}'` should
-   `401`. With the correct secret and a valid body (`{"severity":"info","source":"test","message":"hi"}`)
-   it should `200`, and the alert should show up in `/messaging`'s sidebar.
+   `401`. With the correct secret and a valid body
+   (`{"severity":"info","source":"test","message":"hi","linkUrl":"https://example.com/opp/1"}`) it
+   should `200`, and the alert should show up in `/messaging`'s sidebar with an "Open record →" link.
+4. **New this pass (Step 3 — alert-surface priority fix):** click "Acknowledge" on that alert row —
+   it should redirect back to `/messaging` and the row should now read "✓ Acknowledged by
+   <your Access email>" instead of showing the button. Click it again (or have a second person try)
+   and confirm it stays attributed to the first acknowledger, not reassigned.
+
+The `alerts` table's three new columns (`link_url`, `acknowledged_by`, `acknowledged_at`) were
+applied directly to the live D1 database via the Cloudflare MCP tools this pass — no manual
+`ALTER TABLE` needed on your end, same "actually do it with the live tools available" discipline as
+the table's original creation.
 
 If any of this doesn't work as expected, tell me what happened — the D1 query patterns
 (`src/messaging/db.ts`) were written against D1's documented API but not exercised against the real

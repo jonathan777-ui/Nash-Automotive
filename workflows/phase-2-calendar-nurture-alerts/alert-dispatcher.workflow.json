@@ -14,7 +14,7 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "notes": "Generic, reusable sub-workflow: every other workflow in this library that needs to raise an internal alert (W1.1/W1.2's generation-failure alert, W0.1/every workflow's errorWorkflow setting) should call THIS webhook rather than hitting Google Chat/SMS directly - one place to change delivery logic. Body contract: {severity: 'info'|'warning'|'critical', source: string (which workflow/step raised it), message: string}. Not itself blocked on an undecided threshold - W2.4's 'documented only' status in the previous version of this catalog was about WHAT triggers an alert (thresholds like 'high-value lead', 'overdue'), not the dispatch mechanism itself, which needed no such decision."
+      "notes": "Generic, reusable sub-workflow: every other workflow in this library that needs to raise an internal alert (W1.1/W1.2's generation-failure alert, W0.1/every workflow's errorWorkflow setting) should call THIS webhook rather than hitting Google Chat/SMS directly - one place to change delivery logic. Body contract: {severity: 'info'|'warning'|'critical', source: string (which workflow/step raised it), message: string, linkUrl?: string}. linkUrl is new this pass - an optional deep link to the record the alert is about (a Twenty CRM Opportunity, etc.), forwarded to Command Center so the primary alert surface is actionable, not just a text log. Not itself blocked on an undecided threshold - W2.4's 'documented only' status in the previous version of this catalog was about WHAT triggers an alert (thresholds like 'high-value lead', 'overdue'), not the dispatch mechanism itself, which needed no such decision."
     },
     {
       "id": "7183e257-5eb4-4c72-a602-aa3693127e7d",
@@ -50,10 +50,10 @@
         "url": "={{ $env.GOOGLE_CHAT_WEBHOOK_URL || 'PLACEHOLDER_GOOGLE_CHAT_WEBHOOK_URL' }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ text: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message }) }}",
+        "jsonBody": "={{ JSON.stringify({ text: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message + '\\nSee Command Center: ' + ($env.COMMAND_CENTER_URL || 'PLACEHOLDER_COMMAND_CENTER_URL') + '/messaging' }) }}",
         "options": {}
       },
-      "notes": "Switched from Slack per Jonathan's request. Google Chat's incoming-webhook API takes the same minimal shape as Slack's ({text: string} POSTed as JSON) - no structural change needed, just the target URL. GOOGLE_CHAT_WEBHOOK_URL is the full webhook URL a Google Chat space's 'Apps & integrations -> Webhooks' screen generates (already includes its own key/token query params - paste the whole URL, not just a base). Smaller gap than the Slack version was: Google Chat rides on the same Google Workspace domain already assumed elsewhere in this system (Drive API in 02 - Launch Checklist, and the Command Center's Cloudflare Access policy is 'anyone on the @orbitaiautomation.com Workspace domain') - still not literally listed as its own checklist line item, but far more likely to already exist than a standalone Slack workspace would."
+      "notes": "SECONDARY surface, not primary - this pass's fix to the alert-surface priority inversion Jonathan flagged: Command Center ('Send to Command Center (in-app)' below) is where a rep actually acts on an alert (deep link to the record, an Acknowledge button); Google Chat exists for external visibility only - someone glancing at Chat sees severity/source/message plus a pointer back to Command Center, not the full actionable surface. Previously this message had no link back at all, making Chat and Command Center read as two co-equal targets rather than primary/secondary. Switched from Slack per Jonathan's request; Google Chat's incoming-webhook API takes the same minimal shape as Slack's ({text: string} POSTed as JSON). GOOGLE_CHAT_WEBHOOK_URL is the full webhook URL a Google Chat space's 'Apps & integrations -> Webhooks' screen generates (already includes its own key/token query params - paste the whole URL, not just a base). Smaller gap than the Slack version was: Google Chat rides on the same Google Workspace domain already assumed elsewhere in this system (Drive API in 02 - Launch Checklist, and the Command Center's Cloudflare Access policy is 'anyone on the @orbitaiautomation.com Workspace domain') - still not literally listed as its own checklist line item, but far more likely to already exist than a standalone Slack workspace would."
     },
     {
       "id": "c7ae99f2-c723-4446-83b0-25f63c19f728",
@@ -66,10 +66,10 @@
         "url": "={{ $env.SMS_PROVIDER_URL || 'PLACEHOLDER_SMS_PROVIDER_URL' }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ to: $env.ALERT_SMS_TO || 'PLACEHOLDER_ALERT_SMS_TO', body: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message }) }}",
+        "jsonBody": "={{ JSON.stringify({ to: $env.ALERT_SMS_TO || 'PLACEHOLDER_ALERT_SMS_TO', body: '[' + $json.body.severity.toUpperCase() + '] ' + $json.body.source + ': ' + $json.body.message + ' - ' + ($env.COMMAND_CENTER_URL || 'PLACEHOLDER_COMMAND_CENTER_URL') + '/messaging' }) }}",
         "options": {}
       },
-      "notes": "Still a real gap, unlike Google Chat: no SMS provider (Twilio or otherwise) appears ANYWHERE in 02 - Launch Checklist - not even as a deferred/later item the way Telnyx and Documenso are. If SMS alerts are actually wanted for go-live, a provider account needs adding to the credential set; until then this stays a named placeholder with no real vendor decided, not just no key yet."
+      "notes": "Secondary/external-visibility surface, same as Google Chat above - a critical-severity nudge with a link back to Command Center, not a substitute for it. Still a real gap, unlike Google Chat: no SMS provider (Twilio or otherwise) appears ANYWHERE in 02 - Launch Checklist - not even as a deferred/later item the way Telnyx and Documenso are. If SMS alerts are actually wanted for go-live, a provider account needs adding to the credential set; until then this stays a named placeholder with no real vendor decided, not just no key yet."
     },
     {
       "id": "9da21190-5429-4ad9-aed8-7e84d0039332",
@@ -82,7 +82,7 @@
         "url": "={{ $env.COMMAND_CENTER_URL }}/api/alerts",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ severity: $json.body.severity, source: $json.body.source, message: $json.body.message }) }}",
+        "jsonBody": "={{ JSON.stringify({ severity: $json.body.severity, source: $json.body.source, message: $json.body.message, linkUrl: $json.body.linkUrl || undefined }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -91,7 +91,7 @@
           "name": "Command Center Alerts Ingest"
         }
       },
-      "notes": "Real, built endpoint (command-center/src/messaging/, Piece 2's Internal Team Messaging) - not a placeholder like Google Chat/SMS. Fires for every severity (unlike SMS, which is critical-only) since the in-app alerts panel is meant to show the full history, not just the urgent ones. The credential here is the ALERTS_INGEST_SECRET plain Wrangler secret set on the Command Center Worker (see command-center/wrangler.toml) - configure the SAME value as this n8n credential's bearer token. COMMAND_CENTER_URL is the deployed Worker's URL (e.g. https://orbit-command-center.<subdomain>.workers.dev, or a custom domain once one's attached)."
+      "notes": "PRIMARY alert surface - this pass's fix to the alert-surface priority Jonathan flagged (Command Center should be primary with actionable buttons/deep-links, Google Chat secondary/external-visibility only; previously both were wired as roughly parallel targets with no distinction). Real, built endpoint (command-center/src/messaging/, Piece 2's Internal Team Messaging) - not a placeholder like Google Chat/SMS. Now forwards linkUrl (new this pass) so `/messaging` can render a real deep link to the record the alert is about, and the page itself gained an Acknowledge action (handleAcknowledgeAlert, command-center/src/messaging/routes.ts) - the two things that make this the surface a rep actually works from rather than just reads. Fires for every severity (unlike SMS, which is critical-only) since the in-app alerts panel is meant to show the full history, not just the urgent ones. The credential here is the ALERTS_INGEST_SECRET plain Wrangler secret set on the Command Center Worker (see command-center/wrangler.toml) - configure the SAME value as this n8n credential's bearer token. COMMAND_CENTER_URL is the deployed Worker's URL (e.g. https://orbit-command-center.<subdomain>.workers.dev, or a custom domain once one's attached)."
     }
   ],
   "connections": {

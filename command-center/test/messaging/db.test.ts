@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FakeD1 } from './fakeD1.js';
 import {
+  acknowledgeAlert,
   createChannel,
   getOrCreateThread,
   listChannels,
@@ -113,14 +114,64 @@ describe('postComment / listComments', () => {
 });
 
 describe('recordAlert / listRecentAlerts', () => {
-  it('round-trips through the fake', async () => {
+  it('round-trips through the fake, including a null linkUrl by default', async () => {
     const db = new FakeD1([
-      { results: [{ id: 'a1', severity: 'critical', source: 'w1', message: 'oops', createdAt: 'x' }] },
+      {
+        results: [
+          {
+            id: 'a1',
+            severity: 'critical',
+            source: 'w1',
+            message: 'oops',
+            createdAt: 'x',
+            linkUrl: null,
+            acknowledgedBy: null,
+            acknowledgedAt: null,
+          },
+        ],
+      },
     ]);
     const alert = await recordAlert(db, 'critical', 'w1', 'oops');
     expect(alert.severity).toBe('critical');
+    expect(alert.linkUrl).toBeNull();
+    expect(alert.acknowledgedBy).toBeNull();
 
     const alerts = await listRecentAlerts(db);
-    expect(alerts).toEqual([{ id: 'a1', severity: 'critical', source: 'w1', message: 'oops', createdAt: 'x' }]);
+    expect(alerts[0]!.linkUrl).toBeNull();
+    expect(alerts[0]!.acknowledgedBy).toBeNull();
+  });
+
+  it('stores a given linkUrl and includes it in the INSERT params', async () => {
+    const db = new FakeD1();
+    const alert = await recordAlert(db, 'warning', 'w2', 'check this', 'https://crm.example/opportunities/123');
+    expect(alert.linkUrl).toBe('https://crm.example/opportunities/123');
+
+    const insertCall = db.calls.find((c) => c.sql.includes('INSERT INTO alerts'));
+    expect(insertCall?.params).toEqual([
+      alert.id,
+      'warning',
+      'w2',
+      'check this',
+      alert.createdAt,
+      'https://crm.example/opportunities/123',
+    ]);
+  });
+});
+
+describe('acknowledgeAlert', () => {
+  it('returns true when the UPDATE actually changed a row (first to acknowledge)', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 1 } }]);
+    const acknowledged = await acknowledgeAlert(db, 'a1', 'jonathan@orbitaiautomation.com');
+    expect(acknowledged).toBe(true);
+
+    const updateCall = db.calls.find((c) => c.sql.includes('UPDATE alerts'));
+    expect(updateCall?.sql).toContain('acknowledged_by IS NULL');
+    expect(updateCall?.params).toEqual(['jonathan@orbitaiautomation.com', expect.any(String), 'a1']);
+  });
+
+  it('returns false when the alert was already acknowledged (no rows changed)', async () => {
+    const db = new FakeD1([], [{ success: true, meta: { changes: 0 } }]);
+    const acknowledged = await acknowledgeAlert(db, 'a1', 'someone-else@orbitaiautomation.com');
+    expect(acknowledged).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import { escapeHtml } from '../util.js';
 import { parseMentions } from './mentions.js';
 import {
+  acknowledgeAlert,
   createChannel,
   getOrCreateThread,
   listChannels,
@@ -10,6 +11,7 @@ import {
   postComment,
   postMessage,
   recordAlert,
+  type Alert,
   type D1Like,
   type SubjectType,
 } from './db.js';
@@ -39,15 +41,41 @@ const PAGE_STYLE = `
          border-radius: 8px; padding: 8px 10px; color: #eaf3fb; font-size: 13px; }
   button { background: linear-gradient(160deg,#1fb6ff,#0a8fd6); color: #04121f; font-weight: 700;
          border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  button.secondary { background: #0a1422; color: #90b3cf; border: 1px solid #1c2c42; }
   .alert-row { border-top: 1px solid #1c2c42; padding: 8px 0; font-size: 12px; }
   .alert-row .sev-critical { color: #fda4af; }
   .alert-row .sev-warning { color: #f6a609; }
   .alert-row .sev-info { color: #90b3cf; }
+  .alert-row .alert-link { display: inline-block; margin-top: 3px; font-size: 11px; }
+  .alert-row .ack-form { margin-top: 4px; }
+  .alert-row .ack-form button { padding: 3px 9px; font-size: 11px; }
+  .alert-row .acked { display: inline-block; margin-top: 4px; font-size: 11px; color: #7fe8db; }
   .empty { color: #52688a; font-size: 13px; }
 `;
 
 function renderMentions(body: string): string {
   return escapeHtml(body).replace(/@([a-zA-Z0-9._-]+)/g, '<span class="mention">@$1</span>');
+}
+
+/** Command Center is the PRIMARY, actionable alert surface (Google Chat is secondary/external-
+ * visibility-only, see alert-dispatcher.workflow.json's W2.4 notes) - this is where that shows up:
+ * a real deep link to the record when one was given, and an Acknowledge action that's the whole
+ * point of an alert living somewhere a human can actually act on it, not just read it. */
+function renderAlertRow(a: Alert): string {
+  const link = a.linkUrl
+    ? `<a class="alert-link" href="${escapeHtml(a.linkUrl)}" target="_blank" rel="noopener">Open record →</a>`
+    : '';
+  const action = a.acknowledgedBy
+    ? `<span class="acked">✓ Acknowledged by ${escapeHtml(a.acknowledgedBy)}</span>`
+    : `<form class="ack-form" method="post" action="/messaging/alerts/acknowledge">
+         <input type="hidden" name="alertId" value="${escapeHtml(a.id)}">
+         <button type="submit" class="secondary">Acknowledge</button>
+       </form>`;
+  return `<div class="alert-row">
+    <span class="sev-${escapeHtml(a.severity)}">[${escapeHtml(a.severity.toUpperCase())}]</span>
+    ${escapeHtml(a.source)}: ${escapeHtml(a.message)}<br>
+    ${link}${action}
+  </div>`;
 }
 
 function pageShell(title: string, body: string, poll?: string): string {
@@ -95,12 +123,7 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
       <div id="alerts">
         ${
           alerts.length
-            ? alerts
-                .map(
-                  (a) =>
-                    `<div class="alert-row"><span class="sev-${escapeHtml(a.severity)}">[${escapeHtml(a.severity.toUpperCase())}]</span> ${escapeHtml(a.source)}: ${escapeHtml(a.message)}</div>`,
-                )
-                .join('')
+            ? alerts.map((a) => renderAlertRow(a)).join('')
             : '<span class="empty">No alerts yet.</span>'
         }
       </div>
@@ -234,6 +257,9 @@ export interface AlertIngestBody {
   severity: string;
   source: string;
   message: string;
+  /** Optional deep link to the record the alert is about - new this pass, see Alert's own
+   * comment in db.ts. Absent for alerts that aren't about a specific record. */
+  linkUrl?: string;
 }
 
 /** Not gated by Cloudflare Access - n8n's alert-dispatcher workflow calls this machine-to-machine,
@@ -254,7 +280,23 @@ export async function handleAlertsIngest(request: Request, db: D1Like): Promise<
       { status: 400 },
     );
   }
+  if (body.linkUrl !== undefined && typeof body.linkUrl !== 'string') {
+    return new Response(JSON.stringify({ ok: false, reason: 'linkUrl, if present, must be a string.' }), { status: 400 });
+  }
 
-  await recordAlert(db, body.severity, body.source, body.message);
+  await recordAlert(db, body.severity, body.source, body.message, body.linkUrl ?? null);
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+/** Human-facing, Access-gated (routed alongside every other /messaging/* route in index.ts) -
+ * unlike handleAlertsIngest above, which is the machine-to-machine write from n8n. This is the
+ * "actionable" half of Command Center being the primary alert surface: a rep clicks Acknowledge
+ * on the page they're already looking at, rather than an alert only ever being read passively. */
+export async function handleAcknowledgeAlert(request: Request, db: D1Like, authorEmail: string): Promise<Response> {
+  const form = await request.formData();
+  const alertId = String(form.get('alertId') ?? '');
+  if (!alertId) return new Response('Missing alertId.', { status: 400 });
+
+  await acknowledgeAlert(db, alertId, authorEmail);
+  return Response.redirect(new URL('/messaging', request.url).toString(), 303);
 }

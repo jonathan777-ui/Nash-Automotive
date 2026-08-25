@@ -115,13 +115,18 @@ Human-Scheduled tagging convention decided against a real Google Calendar setup;
 nurture/CX message *content* decided (the brief resolves the CX cadence's timing — 7/30/60/90-day
 then quarterly — but not what each touch says).
 
-**W2.4 — scaffolded this pass.** The dispatch mechanism itself (receive an alert, route to Google
-Chat and/or SMS by severity) didn't need the undecided thresholds resolved first — only *what
-triggers* an alert ("high-value lead," what counts as "overdue") is still undecided, and any future
-workflow that decides those can just call the dispatcher that already exists. Routes to Google Chat
-rather than Slack (swapped per Jonathan's request — the brief's own "Slack/SMS" phrasing predates
-that). See `phase-2-calendar-nurture-alerts/README.md`: SMS still has no vendor anywhere in
-`02 - Launch Checklist`.
+**W2.4 — scaffolded in an earlier pass, alert-surface priority fixed this pass (Step 3).** The
+dispatch mechanism itself (receive an alert, route to Google Chat and/or SMS by severity) didn't need
+the undecided thresholds resolved first — only *what triggers* an alert ("high-value lead," what
+counts as "overdue") is still undecided, and any future workflow that decides those can just call
+the dispatcher that already exists. Routes to Google Chat rather than Slack (swapped per Jonathan's
+request — the brief's own "Slack/SMS" phrasing predates that). **This pass:** fixed the alert-surface
+priority inversion `05 §11` calls out — Command Center is now the PRIMARY, actionable surface
+(`linkUrl` carried through to a real "Open record →" deep link, plus a new Acknowledge action on
+`/messaging`) and Google Chat/SMS are explicitly SECONDARY (both now carry a link back to Command
+Center's `/messaging` page instead of being dead-end notifications with no path back to where a rep
+actually acts). See `phase-2-calendar-nurture-alerts/README.md` and `command-center/README.md`'s
+"Step 3" note: SMS still has no vendor anywhere in `02 - Launch Checklist`.
 
 **W2.5 (new, from CRM Architecture §13)** — "Communications Hub — custom object covering Calls/SMS/
 Social/Other, polymorphic to Person + Company + Opportunity — every touchpoint in one place

@@ -56,6 +56,16 @@ export interface Alert {
   source: string;
   message: string;
   createdAt: string;
+  /** Deep link back to the record the alert is about (an Opportunity in Twenty CRM, a Location,
+   * etc.) — new this pass, part of making Command Center the PRIMARY, actionable alert surface
+   * (Google Chat is secondary/external-visibility-only, see alert-dispatcher.workflow.json). Null
+   * for alerts that aren't about a specific record. */
+  linkUrl: string | null;
+  /** Who acknowledged this alert and when — null/null until someone does. First-to-acknowledge
+   * wins (acknowledgeAlert only writes when these are still null); a repeat click on an already-
+   * acknowledged alert is a no-op, not an overwrite. */
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
 }
 
 export async function createChannel(db: D1Like, name: string): Promise<Channel> {
@@ -168,19 +178,49 @@ export async function recordAlert(
   severity: string,
   source: string,
   message: string,
+  linkUrl: string | null = null,
 ): Promise<Alert> {
-  const alert: Alert = { id: newId(), severity, source, message, createdAt: nowIso() };
+  const alert: Alert = {
+    id: newId(),
+    severity,
+    source,
+    message,
+    createdAt: nowIso(),
+    linkUrl,
+    acknowledgedBy: null,
+    acknowledgedAt: null,
+  };
   await db
-    .prepare('INSERT INTO alerts (id, severity, source, message, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(alert.id, alert.severity, alert.source, alert.message, alert.createdAt)
+    .prepare('INSERT INTO alerts (id, severity, source, message, created_at, link_url) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(alert.id, alert.severity, alert.source, alert.message, alert.createdAt, alert.linkUrl)
     .run();
   return alert;
 }
 
 export async function listRecentAlerts(db: D1Like, limit = 20): Promise<Alert[]> {
   const { results } = await db
-    .prepare('SELECT id, severity, source, message, created_at AS createdAt FROM alerts ORDER BY created_at DESC LIMIT ?')
+    .prepare(
+      'SELECT id, severity, source, message, created_at AS createdAt, link_url AS linkUrl, ' +
+        'acknowledged_by AS acknowledgedBy, acknowledged_at AS acknowledgedAt ' +
+        'FROM alerts ORDER BY created_at DESC LIMIT ?',
+    )
     .bind(limit)
     .all<Alert>();
   return results;
+}
+
+/** First-to-acknowledge wins: only writes when the alert isn't already acknowledged, so a second
+ * click (another rep, or a page double-submit) doesn't silently reassign who handled it. Returns
+ * true if this call was the one that acknowledged it, false if it was already acknowledged (or
+ * doesn't exist) — the caller doesn't currently branch on this, but it's honest about what
+ * happened rather than reporting success either way. */
+export async function acknowledgeAlert(db: D1Like, id: string, byEmail: string): Promise<boolean> {
+  // D1's real .run() result includes meta.changes per Cloudflare's documented API - same
+  // "documented assumption, not exercised against a live Worker" caveat as every other D1 query
+  // in this file (DEPLOY.md's schema-applied-but-unverified note applies here too).
+  const result = (await db
+    .prepare('UPDATE alerts SET acknowledged_by = ?, acknowledged_at = ? WHERE id = ? AND acknowledged_by IS NULL')
+    .bind(byEmail, nowIso(), id)
+    .run()) as { meta?: { changes?: number } } | undefined;
+  return (result?.meta?.changes ?? 0) > 0;
 }

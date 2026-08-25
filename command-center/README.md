@@ -92,9 +92,9 @@ on real credentials" discipline as everything else here.
 **Status after the v4 review (`06 - Recent Changes Summary`):** the foundation (D1 schema, auth
 routing, polling UI) holds up, but the first pass was built against Opportunity-only anchoring and a
 free-form channel model, both of which v4 supersedes. Jonathan's requested sequence: object model
-first (this pass), then fix the alert-surface priority inversion, then the fixed 11-channel
-taxonomy, then rebuild Tag-for-Action properly — see `CRM-OBJECT-MODEL.md` and
-`workflows/README.md` for the full comparison and plan.
+(done), then fix the alert-surface priority inversion (**done this pass — Step 3**), then the fixed
+11-channel taxonomy (Step 4), then rebuild Tag-for-Action properly (Step 5) — see
+`CRM-OBJECT-MODEL.md` and `workflows/README.md` for the full comparison and plan.
 
 - `src/messaging/db.ts` — all reads/writes against a **real, already-provisioned Cloudflare D1
   database** (`orbit-command-center-messaging`, created directly via the Cloudflare MCP tools during
@@ -115,23 +115,37 @@ taxonomy, then rebuild Tag-for-Action properly — see `CRM-OBJECT-MODEL.md` and
   thread with lightweight polling for a "feels live" update without a full page reload, a comment
   thread page keyed by `?subjectType=&subjectId=`, and a recent-alerts panel).
 - New routes wired into `src/index.ts`: `GET/POST /messaging`, `GET/POST /messaging/thread`,
-  and `POST /api/alerts`. That last one is deliberately **not** behind Cloudflare Access — n8n's
-  alert-dispatcher workflow calls it machine-to-machine and can't complete an interactive Access
-  login, so it's checked *before* the Access gate and authenticated with its own shared secret
-  (`ALERTS_INGEST_SECRET`, a plain Wrangler secret like `CF_API_TOKEN` — never in Secrets Store or
-  `wrangler.toml`, since that's the credential this Worker uses to *receive* pushes, not one a human
-  submits through the form). Until that secret is set for real, `/api/alerts` returns 401 on every
-  request rather than silently accepting unauthenticated writes. **Still uses the old
-  {severity, source, message} shape** — no deep-link/action-button fields yet; that's Step 3
-  (alert-surface priority fix) and Step 4 (channel routing), not this pass.
-- 20 tests (`command-center/npm test`) against a fake D1 (records calls, returns queued results —
+  `POST /messaging/alerts/acknowledge` (new this pass — see Step 3 below), and `POST /api/alerts`.
+  That last one is deliberately **not** behind Cloudflare Access — n8n's alert-dispatcher workflow
+  calls it machine-to-machine and can't complete an interactive Access login, so it's checked
+  *before* the Access gate and authenticated with its own shared secret (`ALERTS_INGEST_SECRET`, a
+  plain Wrangler secret like `CF_API_TOKEN` — never in Secrets Store or `wrangler.toml`, since
+  that's the credential this Worker uses to *receive* pushes, not one a human submits through the
+  form). Until that secret is set for real, `/api/alerts` returns 401 on every request rather than
+  silently accepting unauthenticated writes. **`/messaging/alerts/acknowledge`, by contrast, IS
+  behind Access** — it's the human-facing action a rep takes, routed alongside every other
+  `/messaging/*` page.
+- 28 tests (`command-center/npm test`) against a fake D1 (records calls, returns queued results —
   same pattern as the `fakeClient()` mocks used for Anthropic calls elsewhere in this repo), plus
   the alerts-ingest auth logic specifically (rejects a missing/wrong/placeholder secret).
 
-**Known backwards priority, not yet fixed (Step 3, next):** `05 §11` states Command Center messaging
-is the *primary* alert surface (actionable buttons, deep-link to exact action) and Google Chat is
-*secondary* (external-visibility-only). The alert-dispatcher workflow currently treats them as
-roughly parallel targets. Fixing this is explicitly queued as the next step, not done here.
+**Step 3 — alert-surface priority fix, done this pass.** `05 §11` states Command Center messaging is
+the *primary* alert surface (actionable buttons, deep-link to exact action) and Google Chat is
+*secondary* (external-visibility-only); the alert-dispatcher workflow used to treat them as roughly
+parallel targets with no distinction. Fixed by making each surface actually match its role:
+  - **`alerts` gained `link_url`, `acknowledged_by`, `acknowledged_at` columns** (applied directly
+    to the live D1 database via the Cloudflare MCP tools, same "actually do it with the live tools
+    available" discipline as the table's original creation — not a migration file sitting unapplied).
+  - **`recordAlert`/`listRecentAlerts`/`POST /api/alerts` carry the alert's `linkUrl` through** — the
+    n8n alert-dispatcher workflow (W2.4) now forwards it when the triggering event names a specific
+    record.
+  - **`/messaging`'s alert rows are now actionable**: a real "Open record →" link when `linkUrl` is
+    set, and an Acknowledge button (`POST /messaging/alerts/acknowledge`, first-to-acknowledge wins —
+    a repeat click on an already-acknowledged alert is a no-op) that shows who handled it once
+    clicked. This is the concrete difference between "primary, actionable surface" and "a text log."
+  - **Google Chat/SMS are now explicitly secondary**: both messages gained a link back to
+    `{COMMAND_CENTER_URL}/messaging` appended to the existing severity/source/message text, instead
+    of being a dead-end notification with nothing pointing back to the actionable surface.
 
 **Not built:** real-time push (WebSocket via a Durable Object) — the message/comment views poll
 every 5s instead, which is simple, testable, and good enough for a "not urgent" internal tool; a

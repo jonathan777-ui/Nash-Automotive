@@ -28,9 +28,17 @@ solved calculation — don't treat it as production-correct until that's added.
 ## W2.4 — `alert-dispatcher.workflow.json`
 
 A generic, reusable sub-workflow: anything else in this library that needs to raise an internal
-alert calls its webhook (`POST /webhook/alert-dispatch`, body `{severity, source, message}`) rather
-than hitting Google Chat/SMS directly. `demo-generation-trigger.workflow.json` (W1.2) already calls
-it — it used to POST to a bare placeholder URL before this existed.
+alert calls its webhook (`POST /webhook/alert-dispatch`, body `{severity, source, message, linkUrl?}`)
+rather than hitting Google Chat/SMS directly. `demo-generation-trigger.workflow.json` (W1.2) already
+calls it — it used to POST to a bare placeholder URL before this existed.
+
+**Alert-surface priority fixed this pass (Step 3, per `05 §11`'s explicit primary/secondary split):**
+Command Center is now the actionable PRIMARY surface — `linkUrl` (new field) flows through to
+`/api/alerts` and renders as a real "Open record →" deep link on `/messaging`, which also gained an
+Acknowledge action (`POST /messaging/alerts/acknowledge`, first-to-acknowledge wins). Google Chat and
+SMS are explicitly SECONDARY now — both messages append a link back to `{COMMAND_CENTER_URL}/messaging`
+instead of being self-contained dead ends with no path to where a rep actually acts. Before this pass
+all three targets fired as roughly parallel, undifferentiated destinations.
 
 **Routes to Google Chat, not Slack** — swapped per Jonathan's request; the brief's own "Slack/SMS via
 n8n" phrasing predates that. Point `GOOGLE_CHAT_WEBHOOK_URL` at a Google Chat space's webhook URL
@@ -46,10 +54,11 @@ stand up.
 answer before this matters for real: is SMS alerting actually wanted, and if so, which provider?
 
 **Also delivers in-app, to Command Center Piece 2's Internal Team Messaging** (`command-center/
-src/messaging/`, built the same pass) — the "Send to Command Center (in-app)" node fires for every
-severity (not critical-only, like SMS), `POST`ing to `/api/alerts` with the `ALERTS_INGEST_SECRET`
-bearer credential. Unlike Google Chat/SMS, this one's a real, tested, already-provisioned target,
-not a named placeholder — see `command-center/README.md`.
+src/messaging/`) — the "Send to Command Center (in-app)" node fires for every severity (not
+critical-only, like SMS), `POST`ing to `/api/alerts` with the `ALERTS_INGEST_SECRET` bearer
+credential. Unlike Google Chat/SMS, this one's a real, tested, already-provisioned target, not a
+named placeholder — see `command-center/README.md`'s "Step 3" note for the full alerts-table/UI
+change list.
 
 **Once imported into a real n8n instance:** note this workflow's assigned ID and update every other
 workflow's `settings.errorWorkflow` field (currently `PLACEHOLDER_ALERT_WORKFLOW_ID` throughout this

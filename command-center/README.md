@@ -92,9 +92,20 @@ on real credentials" discipline as everything else here.
 **Status after the v4 review (`06 - Recent Changes Summary`):** the foundation (D1 schema, auth
 routing, polling UI) holds up, but the first pass was built against Opportunity-only anchoring and a
 free-form channel model, both of which v4 supersedes. Jonathan's requested sequence: object model
-(done), then fix the alert-surface priority inversion (**done this pass — Step 3**), then the fixed
-11-channel taxonomy (Step 4), then rebuild Tag-for-Action properly (Step 5) — see
-`CRM-OBJECT-MODEL.md` and `workflows/README.md` for the full comparison and plan.
+(done), alert-surface priority inversion (done — Step 3), fixed 11-channel taxonomy (**done this
+pass — Step 4**), Tag-for-Action rebuilt properly (Step 5, see below) — see `CRM-OBJECT-MODEL.md`
+and `workflows/README.md` for the full comparison and plan.
+
+**Step 4 — the real 11-channel taxonomy, done this pass.** `05 §14` gives the exact channel map, not
+a free-form model: `#new-leads`, `#demos`, `#dialer`, `#nurture`, `#portal-conversion`,
+`#onboarding`, `#cx-retention`, `#missed-follow-ups`, `#system-alerts`, `#ai-agents`, `#accounting`.
+All 11 seeded directly into the live `channels` table via the Cloudflare D1 MCP tools (the table was
+empty — a clean insert, not a migration). `src/messaging/alertRouting.ts` (new, unit-tested) maps an
+alert's `source` string to the right channel via substring match, falling back to `#system-alerts`
+for anything unrecognized; `POST /api/alerts` computes this at ingest time and a new `channel` column
+on `alerts` stores it. Each channel's own message view (`/messaging?channel=...`) now also renders
+that channel's alerts above the chat thread — previously every alert only ever showed in the flat
+"Recent alerts" sidebar regardless of what it was about.
 
 - `src/messaging/db.ts` — all reads/writes against a **real, already-provisioned Cloudflare D1
   database** (`orbit-command-center-messaging`, created directly via the Cloudflare MCP tools during

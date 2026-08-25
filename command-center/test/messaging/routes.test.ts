@@ -13,20 +13,26 @@ describe('handleAlertsIngest — linkUrl', () => {
     expect(res.status).toBe(200);
 
     const insertCall = db.calls.find((c) => c.sql.includes('INSERT INTO alerts'));
-    expect(insertCall?.params).toEqual([expect.any(String), 'info', 'test', 'hi', expect.any(String), null]);
+    expect(insertCall?.params).toEqual([expect.any(String), 'info', 'test', 'hi', expect.any(String), null, 'system-alerts']);
   });
 
-  it('accepts and stores a valid linkUrl', async () => {
+  it('accepts and stores a valid linkUrl, and computes the channel from source', async () => {
     const db = new FakeD1();
     const req = new Request('https://x/api/alerts', {
       method: 'POST',
-      body: JSON.stringify({ severity: 'critical', source: 'test', message: 'hi', linkUrl: 'https://crm.example/opp/1' }),
+      body: JSON.stringify({
+        severity: 'critical',
+        source: 'stripe-payment-to-crm',
+        message: 'hi',
+        linkUrl: 'https://crm.example/opp/1',
+      }),
     });
     const res = await handleAlertsIngest(req, db);
     expect(res.status).toBe(200);
 
     const insertCall = db.calls.find((c) => c.sql.includes('INSERT INTO alerts'));
     expect(insertCall?.params?.[5]).toBe('https://crm.example/opp/1');
+    expect(insertCall?.params?.[6]).toBe('portal-conversion');
   });
 
   it('rejects a non-string linkUrl', async () => {

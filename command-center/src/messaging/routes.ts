@@ -1,9 +1,11 @@
 import { escapeHtml } from '../util.js';
+import { channelForSource } from './alertRouting.js';
 import { parseMentions } from './mentions.js';
 import {
   acknowledgeAlert,
   createChannel,
   getOrCreateThread,
+  listAlertsForChannel,
   listChannels,
   listComments,
   listMessages,
@@ -103,6 +105,7 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
   const messages = activeId ? await listMessages(db, activeId) : [];
   const alerts = await listRecentAlerts(db, 10);
   const activeChannel = channels.find((c) => c.id === activeId);
+  const channelAlerts = activeChannel ? await listAlertsForChannel(db, activeChannel.name, 10) : [];
 
   const sidebar = `
     <div class="card">
@@ -132,6 +135,13 @@ export async function handleMessagingPage(request: Request, db: D1Like): Promise
   const main = `
     <div class="card">
       <h1>${activeChannel ? '#' + escapeHtml(activeChannel.name) : 'No channel selected'}</h1>
+      ${
+        channelAlerts.length
+          ? `<div id="channel-alerts" style="margin-bottom:14px">
+               ${channelAlerts.map((a) => renderAlertRow(a)).join('')}
+             </div>`
+          : ''
+      }
       <div id="messages">
         ${
           messages.length
@@ -284,7 +294,7 @@ export async function handleAlertsIngest(request: Request, db: D1Like): Promise<
     return new Response(JSON.stringify({ ok: false, reason: 'linkUrl, if present, must be a string.' }), { status: 400 });
   }
 
-  await recordAlert(db, body.severity, body.source, body.message, body.linkUrl ?? null);
+  await recordAlert(db, body.severity, body.source, body.message, body.linkUrl ?? null, channelForSource(body.source));
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 

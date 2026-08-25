@@ -66,6 +66,10 @@ export interface Alert {
    * acknowledged alert is a no-op, not an overwrite. */
   acknowledgedBy: string | null;
   acknowledgedAt: string | null;
+  /** Which of the 11 taxonomy channels (`05 §14`) this alert belongs in, computed at ingest time
+   * from `source` via `channelForSource` - new this pass. Nullable only for rows written before
+   * this column existed; every new alert always gets one. */
+  channel: string | null;
 }
 
 export async function createChannel(db: D1Like, name: string): Promise<Channel> {
@@ -179,6 +183,7 @@ export async function recordAlert(
   source: string,
   message: string,
   linkUrl: string | null = null,
+  channel: string | null = null,
 ): Promise<Alert> {
   const alert: Alert = {
     id: newId(),
@@ -189,22 +194,35 @@ export async function recordAlert(
     linkUrl,
     acknowledgedBy: null,
     acknowledgedAt: null,
+    channel,
   };
   await db
-    .prepare('INSERT INTO alerts (id, severity, source, message, created_at, link_url) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(alert.id, alert.severity, alert.source, alert.message, alert.createdAt, alert.linkUrl)
+    .prepare(
+      'INSERT INTO alerts (id, severity, source, message, created_at, link_url, channel) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    )
+    .bind(alert.id, alert.severity, alert.source, alert.message, alert.createdAt, alert.linkUrl, alert.channel)
     .run();
   return alert;
 }
 
+const ALERT_SELECT =
+  'SELECT id, severity, source, message, created_at AS createdAt, link_url AS linkUrl, ' +
+  'acknowledged_by AS acknowledgedBy, acknowledged_at AS acknowledgedAt, channel FROM alerts';
+
 export async function listRecentAlerts(db: D1Like, limit = 20): Promise<Alert[]> {
   const { results } = await db
-    .prepare(
-      'SELECT id, severity, source, message, created_at AS createdAt, link_url AS linkUrl, ' +
-        'acknowledged_by AS acknowledgedBy, acknowledged_at AS acknowledgedAt ' +
-        'FROM alerts ORDER BY created_at DESC LIMIT ?',
-    )
+    .prepare(`${ALERT_SELECT} ORDER BY created_at DESC LIMIT ?`)
     .bind(limit)
+    .all<Alert>();
+  return results;
+}
+
+/** Alerts scoped to one channel - what a channel's own message view now also renders alongside its
+ * chat messages, so #dialer (say) actually shows dialer alerts, not just whatever gets typed there. */
+export async function listAlertsForChannel(db: D1Like, channel: string, limit = 20): Promise<Alert[]> {
+  const { results } = await db
+    .prepare(`${ALERT_SELECT} WHERE channel = ? ORDER BY created_at DESC LIMIT ?`)
+    .bind(channel, limit)
     .all<Alert>();
   return results;
 }

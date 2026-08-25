@@ -4,6 +4,7 @@ import {
   acknowledgeAlert,
   createChannel,
   getOrCreateThread,
+  listAlertsForChannel,
   listChannels,
   listComments,
   listMessages,
@@ -141,10 +142,11 @@ describe('recordAlert / listRecentAlerts', () => {
     expect(alerts[0]!.acknowledgedBy).toBeNull();
   });
 
-  it('stores a given linkUrl and includes it in the INSERT params', async () => {
+  it('stores a given linkUrl and channel, and includes both in the INSERT params', async () => {
     const db = new FakeD1();
-    const alert = await recordAlert(db, 'warning', 'w2', 'check this', 'https://crm.example/opportunities/123');
+    const alert = await recordAlert(db, 'warning', 'w2', 'check this', 'https://crm.example/opportunities/123', 'dialer');
     expect(alert.linkUrl).toBe('https://crm.example/opportunities/123');
+    expect(alert.channel).toBe('dialer');
 
     const insertCall = db.calls.find((c) => c.sql.includes('INSERT INTO alerts'));
     expect(insertCall?.params).toEqual([
@@ -154,7 +156,20 @@ describe('recordAlert / listRecentAlerts', () => {
       'check this',
       alert.createdAt,
       'https://crm.example/opportunities/123',
+      'dialer',
     ]);
+  });
+});
+
+describe('listAlertsForChannel', () => {
+  it('queries by channel and returns whatever D1 gives back', async () => {
+    const db = new FakeD1([{ results: [{ id: 'a1', severity: 'info', source: 'w1', message: 'x', createdAt: 't', channel: 'dialer' }] }]);
+    const alerts = await listAlertsForChannel(db, 'dialer');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.channel).toBe('dialer');
+
+    const selectCall = db.calls.find((c) => c.sql.includes('WHERE channel'));
+    expect(selectCall?.params[0]).toBe('dialer');
   });
 });
 

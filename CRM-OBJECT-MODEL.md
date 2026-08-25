@@ -33,6 +33,57 @@ logged automatically — **is** in scope, and is Twenty CRM's own native per-use
 connect feature, not something this repo needs to build. Mostly a configuration step once a real
 instance exists (OAuth/IMAP connect per rep) — worth a Launch Checklist line, not new code.
 
+## Compliance layer (locked this pass)
+
+Enhanced compliance logic sits in front of two things: the dialer's pacing (how many
+simultaneous calls per agent, how fast the system dials) and the calling action itself (is this
+the right window, is this contact's consent status honored). Both are built as real gates this
+pass, not left as a policy note — same discipline the DNC gate (W2.6) already set.
+
+**Pacing (locked): fully automatic, no manual control by anyone.** The system watches a rolling
+abandonment rate per Campaign and ratchets `currentAllowedSimultaneousCallsPerAgent` up/down
+against a `targetAbandonmentRateBp` (default seeded at 300bp / 3%, the FTC TSR's own
+abandonment-rate ceiling — **flagged for compliance-owner/counsel confirmation before launch**,
+same treatment as every other legally-consequential default in this repo) and a
+`maxSimultaneousCallsPerAgentCeiling` hard safety cap an admin sets once per Campaign. Neither
+the rep nor Command Center manually nudges pacing during a live campaign — the only human lever
+is that ceiling, set before the campaign runs, not adjusted call-by-call. See Campaign's
+extended fields below and `phase-3-dialer-hopper/pacing-controller.workflow.json` (new this
+pass, not part of the brief's original W-numbering — nothing in `05`/`06` names this).
+
+**Two-party consent states (locked): a seeded reference list, not invented per-call.** Before
+any call recording happens (Phase 5, not built), the live-dial layer must check the Location's
+state against the commonly-cited all-party-consent state set (CA, CT, DE, FL, IL, MD, MA, MI,
+MT, NV, NH, PA, WA — **flagged for counsel confirmation before launch**, same as the
+abandonment-rate default, since state consent law changes and this isn't a verified-against-
+current-statute source). In a two-party-consent state, recording requires either an explicit
+verbal consent announcement at call start or written consent on file — this repo doesn't yet
+build the dialer's live-call layer, so this is captured as the *policy* the eventual Phase 5
+build must enforce, plus the `state` field Location needed to check it against (added below,
+didn't exist before this pass).
+
+**No-rebuttal (locked): a global policy, not state-keyed.** Rather than encode a state-by-state
+"no further pitch after a decline" statute list (no confident source for that as a distinct
+codified legal category — flagged, not guessed at), this is enforced as a standing script rule
+for every call regardless of state: once a lead clearly declines, the call ends, no further
+persuasion attempt. W3.4's post-call synthesis now flags a `Rebuttal After Decline` boolean
+from the transcript so a violation is visible for QA/compliance review instead of silently
+unlogged — see W3.4 below.
+
+**Compliant calling hours (locked): TCPA's federal floor (8am-9pm in the called party's own
+local time), narrowed per state where a state sets a tighter window.** Outbound calls outside
+that window are blocked outright *unless* the contact directly requested being called outside
+those hours — and that request itself must be evidenced, not just claimed. See ConsentRecord
+below and `phase-2-calendar-nurture-alerts/compliant-hours-consent-gate.workflow.json` (new
+this pass, not part of the brief's original W-numbering).
+
+**Off-hours exception: a dual gate, system + human, not either alone.** The gate first checks
+that a ConsentRecord exists with a real `evidenceRef` (a call-recording ID, an email message
+ID, or an SMS message ID — never bare text claiming consent), *then* requires a human
+(`verifiedByRepId`/`verifiedAt`) to have actually reviewed and confirmed that evidence supports
+the exception before the gate opens. Both checks fail closed: missing evidence blocks, and
+evidence that exists but hasn't been human-verified also blocks.
+
 ## Hierarchy
 
 ```
@@ -68,10 +119,12 @@ Single physical site, GBP-driven. Demos and Front Door Audits are inherently per
 attach here — not on the Opportunity that may span several Locations, and not on the Company that
 may hold Locations under completely different Contracts.
 
-- Fields: `id`, `name`, `gbpUrl`, `address`, `opportunityId` (which Opportunity brought it in),
-  `companyId` (nullable — set on Won), `contractStatus` (`None` / `ActiveM2M` / `ActiveTerm`),
-  `contractExpiresAt` (nullable), `frontDoorAuditStatus`, `frontDoorAuditScore`,
-  `frontDoorAuditReportUrl`, `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`.
+- Fields: `id`, `name`, `gbpUrl`, `address`, `state` (2-letter, parsed from `address` — new this
+  pass, needed for the compliance layer's two-party-consent and calling-hours lookups),
+  `opportunityId` (which Opportunity brought it in), `companyId` (nullable — set on Won),
+  `contractStatus` (`None` / `ActiveM2M` / `ActiveTerm`), `contractExpiresAt` (nullable),
+  `frontDoorAuditStatus`, `frontDoorAuditScore`, `frontDoorAuditReportUrl`,
+  `dueDiligenceReportUrl`, `demoStatus`, `demoStepUsed`.
 - Assumed REST: `GET/POST/PATCH /rest/locations`, `/rest/locations/{id}`.
 - **Location Contract Lock**: `contractStatus` is the field every lock check reads. A NEW
   Contract-generation attempt on a Location that's already `ActiveM2M`/`ActiveTerm` from an
@@ -142,7 +195,14 @@ free-text email string.
 A named, loadable batch of records to dial — "the hopper" is really "Campaign + its HopperEntry
 rows." Lightweight, mostly for grouping/reporting; the actual queue mechanics live on HopperEntry.
 
-- Fields: `id`, `name`, `source` (e.g. a scraper batch ID, a niche selection), `createdAt`.
+- Fields: `id`, `name`, `source` (e.g. a scraper batch ID, a niche selection), `createdAt`,
+  `targetAbandonmentRateBp` (basis points, default-seeded 300 = 3%, the FTC TSR ceiling —
+  flagged for compliance-owner confirmation, see Compliance layer above),
+  `maxSimultaneousCallsPerAgentCeiling` (admin-set once per Campaign — the only manual pacing
+  lever; not adjusted mid-campaign by anyone), `currentAllowedSimultaneousCallsPerAgent`
+  (computed/ratcheted by the pacing controller, starts at the ceiling),
+  `rollingAbandonmentRate` (basis points, computed by the pacing controller from recent call
+  outcomes).
 - Assumed REST: `/rest/campaigns`, `/rest/campaigns/{id}`.
 - **No membership/ownership restriction** — confirmed explicitly: a Campaign is not gated to a
   specific set of reps ("no multi-member campaign"). Any available rep can pull from any active
@@ -172,6 +232,21 @@ queue. This is where the shared-pool-vs-personal-hold distinction actually lives
   - Hard stops (`OptOut`, `WrongNumber`, or the attempt matrix's `STOP`) → `status: 'Completed'` or
     `'OptedOut'`, removed from the hopper entirely, never re-queued.
 
+### ConsentRecord (new this pass)
+Evidence a contact affirmatively asked for something this system would otherwise block — right
+now the only value is an off-hours call request, but the shape generalizes.
+
+- Fields: `id`, `opportunityId`, `type` (`OffHoursCallRequest` — only value so far),
+  `evidenceType` (`Recording` / `Email` / `SMS`), `evidenceRef` (the actual recording ID, email
+  message ID, or SMS message ID — never free text describing consent), `capturedAt`,
+  `verifiedByRepId` (nullable — set once a human confirms the evidence actually supports the
+  exception), `verifiedAt` (nullable).
+- Assumed REST: `/rest/consentRecords`, `/rest/consentRecords/{id}`.
+- **Dual-gate, fails closed on either half missing**: `evidenceRef` existing is necessary but
+  not sufficient — `verifiedByRepId`/`verifiedAt` must also be set before
+  `compliant-hours-consent-gate.workflow.json` allows an off-hours call. See the Compliance
+  layer section above.
+
 ## What anchors where — the actual per-workflow decisions this pass made
 
 | Concern | Anchor | Why |
@@ -184,6 +259,8 @@ queue. This is where the shared-pool-vs-personal-hold distinction actually lives
 | Referral trigger, health/usage scoring, tier upgrade, churn | Company | Post-sale — see the load-bearing distinction above. |
 | Call disposition/post-call synthesis | Opportunity | The call is about advancing a specific deal, pre- or post- doesn't change who's being called. |
 | Dialer hopper claim/queue state | HopperEntry (its own object, not Opportunity) | The queue-position/ownership state (`Available`/`Claimed`/`CallbackLocked`, attempt count, wave) isn't a deal fact — it's dialer-mechanics state that would clutter the Opportunity record and doesn't need CRM-wide visibility the way a stage does. |
+| Off-hours call consent evidence | ConsentRecord (its own object, not Opportunity) | Needs its own evidence-type/verification lifecycle (system-checked existence + human sign-off) that would clutter the Opportunity record and isn't itself a deal fact. |
+| Dialer pacing state (abandonment rate, allowed simultaneous calls) | Campaign | Pacing is a property of the batch being worked, not of any individual record in it — matches HopperEntry already belonging to a Campaign. |
 
 Every row above is implemented in the corresponding workflow this pass, with the reasoning repeated
 in that workflow's own `notes` field — see `workflows/README.md` and each phase folder's README for

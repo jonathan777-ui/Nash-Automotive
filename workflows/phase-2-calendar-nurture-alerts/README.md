@@ -1,9 +1,29 @@
 # Phase 2 — Calendar + Nurture/CX Cadence + Alerts (partial)
 
-Two of Phase 2's six catalog entries scaffolded this pass — the two whose mechanics didn't depend on
-an undecided business rule, unlike the rest of Phase 2 (nurture/CX message content, the calendar's
-event schema, Communications Hub's object schema). See `workflows/README.md` for the full Phase 2
-catalog.
+Two of Phase 2's six brief-numbered catalog entries scaffolded in an earlier pass — the two whose
+mechanics didn't depend on an undecided business rule, unlike the rest of Phase 2 (nurture/CX message
+content, the calendar's event schema, Communications Hub's object schema). Plus one new, non-brief
+gate added this pass (W2.7) as part of the compliance layer. See `workflows/README.md` for the full
+Phase 2 catalog.
+
+## W2.7 — `compliant-hours-consent-gate.workflow.json` (new this pass, not in the brief's own numbering)
+
+The same hard-gate pattern as W2.6's DNC check — called synchronously by the dialer before it ever
+dials, meant to run alongside DNC, not instead of it. Blocks outbound calls outside TCPA's federal
+8am-9pm (called party's local time) floor, narrowed per state where one sets a tighter window (the
+override table is seeded empty — no state-specific hour was encoded without a verified source; see
+`CRM-OBJECT-MODEL.md`'s Compliance layer section). The only way through outside that window is a
+verified **ConsentRecord** (new object this pass): the contact directly asked to be called
+outside normal hours, evidenced by a real recording ID, email, or SMS message ID
+(`evidenceRef`) — checked by the system — *and* confirmed by a human (`verifiedByRepId`/
+`verifiedAt`) — per Jonathan's explicit "system checks existence, human confirms validity"
+answer. Either half missing blocks the call.
+
+**Known limitation, flagged rather than silently wrong:** the hour check reads the *server's* local
+hour, not the called party's actual time zone — Location only carries a US `state` (added this
+pass), not a timezone/UTC offset, and several states span multiple zones or have partial DST
+exceptions (AZ, IN). This is an honest placeholder for a real state/zip → timezone lookup, not a
+solved calculation — don't treat it as production-correct until that's added.
 
 ## W2.4 — `alert-dispatcher.workflow.json`
 

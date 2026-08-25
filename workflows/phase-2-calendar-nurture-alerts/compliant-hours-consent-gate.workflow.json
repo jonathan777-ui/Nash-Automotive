@@ -1,0 +1,190 @@
+{
+  "name": "Orbit AI - Phase 2 - Compliant hours + off-hours consent gate (W2.7, new - not in the brief's original numbering)",
+  "nodes": [
+    {
+      "id": "b5fd84ef-6f3e-47be-8359-0f7c62f58e25",
+      "name": "Compliant hours webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1100, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "compliant-hours-consent-gate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Same 'hard action-layer block, called synchronously by the dialer before it ever dials' pattern as dnc-check.workflow.json (W2.6) - meant to run alongside that check, not instead of it. Input contract: {opportunityId, locationId, requestedAt?} - requestedAt is optional (defaults to now server-side), present so a scheduled/queued dial attempt can be checked against the time it will actually fire, not the time it was scheduled."
+    },
+    {
+      "id": "c4294d0f-0a9c-420c-92c1-b944d90d0631",
+      "name": "Fetch Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-860, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.body.locationId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Needs Location's state field (new this pass - CRM-OBJECT-MODEL.md) to know which calling-hours window applies. Same Twenty CRM REST-shape uncertainty as every workflow in this library."
+    },
+    {
+      "id": "c51d5212-3adb-4470-9d17-ca2abb5c94f9",
+      "name": "Check compliant hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-620, 0],
+      "parameters": {
+        "jsCode": "// TCPA's federal floor: 8am-9pm in the called party's own local time. State overrides narrow\n// that window further where a state sets a tighter one - flagged for counsel confirmation before\n// launch, same treatment as every other legally-consequential default in this repo\n// (CRM-OBJECT-MODEL.md's Compliance layer section). Empty on purpose: no state override is\n// encoded here without a verified source, rather than guess at one.\nconst STATE_HOUR_OVERRIDES = {};\nconst FEDERAL_START_HOUR = 8;\nconst FEDERAL_END_HOUR = 21;\n\nconst location = $('Fetch Location').item.json;\nconst webhookBody = $('Compliant hours webhook').item.json.body;\nconst requestedAt = webhookBody.requestedAt ? new Date(webhookBody.requestedAt) : new Date();\n\nconst [startHour, endHour] = STATE_HOUR_OVERRIDES[location.state] || [FEDERAL_START_HOUR, FEDERAL_END_HOUR];\n\n// KNOWN LIMITATION, flagged rather than silently wrong: this reads the SERVER's local hour, not\n// the called party's actual local time zone. Location only has a US state (added this pass), not\n// a timezone/UTC offset, and several states span multiple zones or have partial DST exceptions\n// (AZ, IN). A real implementation needs a state/zip -> timezone lookup (or Location's own\n// timezone field) before this is trustworthy in production - this is the honest placeholder\n// until that exists, not a solved calculation.\nconst localHour = requestedAt.getHours();\nconst inWindow = localHour >= startHour && localHour < endHour;\n\nreturn [{\n  json: {\n    inWindow,\n    localHour,\n    windowStart: startHour,\n    windowEnd: endHour,\n    reason: inWindow\n      ? `Within the ${startHour}:00-${endHour}:00 compliant-hours window for state ${location.state || 'unknown'}.`\n      : `Outside the ${startHour}:00-${endHour}:00 compliant-hours window for state ${location.state || 'unknown'} - needs a system-checked and human-verified off-hours ConsentRecord.`,\n  },\n}];"
+      }
+    },
+    {
+      "id": "e6ef4830-0e21-49c3-9f2c-6b7c8aed06ca",
+      "name": "In window?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-380, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.inWindow }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e17270ea-c387-4009-a2d3-8e8c9e542203",
+      "name": "Respond: allowed (in window)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-140, -100],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ allowed: true, reason: $json.reason }) }}"
+      }
+    },
+    {
+      "id": "8f8f0336-9b4d-4ddb-8f42-36b03216605a",
+      "name": "Fetch ConsentRecords",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-140, 80],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/consentRecords?filter=opportunityId[eq]:{{ $('Compliant hours webhook').item.json.body.opportunityId }},type[eq]:OffHoursCallRequest",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Only reached when the requested time is outside the compliant-hours window - ConsentRecord (new this pass, CRM-OBJECT-MODEL.md) is the exception's evidence trail."
+    },
+    {
+      "id": "450ff83f-e2ec-4f5b-a50e-be3650d9a6b9",
+      "name": "Check consent evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, 80],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.consentRecords)) return json.data.consentRecords;\n  if (json && Array.isArray(json.consentRecords)) return json.consentRecords;\n  return [];\n}\n\nconst records = $input.all().flatMap(asArray);\n\n// Dual gate, fails closed on either half missing (CRM-OBJECT-MODEL.md's ConsentRecord section,\n// per Jonathan's explicit 'system checks existence, human confirms validity' answer): evidenceRef\n// existing is necessary but not sufficient - a human still has to have verified it.\nconst verified = records.find((r) => r.evidenceRef && r.verifiedByRepId && r.verifiedAt);\n\nif (verified) {\n  return [{\n    json: {\n      consentVerified: true,\n      consentRecordId: verified.id,\n      reason: 'A verified off-hours ConsentRecord is on file.',\n    },\n  }];\n}\n\nconst hasUnverifiedEvidence = records.some((r) => r.evidenceRef);\nreturn [{\n  json: {\n    consentVerified: false,\n    reason: hasUnverifiedEvidence\n      ? 'A ConsentRecord with evidence exists but has not been human-verified yet - blocked until verifiedByRepId/verifiedAt are set.'\n      : 'No off-hours ConsentRecord with evidence (recording ID, email, or SMS message ID) on file for this Opportunity.',\n  },\n}];"
+      }
+    },
+    {
+      "id": "2051ca70-01b9-4db9-8c40-bf9f51a02509",
+      "name": "Consent verified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [340, 80],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.consentVerified }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00f7d367-74f0-471a-91cb-6372b2503a6b",
+      "name": "Respond: allowed (off-hours, verified)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [580, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ allowed: true, reason: $json.reason, consentRecordId: $json.consentRecordId }) }}"
+      }
+    },
+    {
+      "id": "f82cfb79-af00-499f-89b9-8bcc4db4c00d",
+      "name": "Respond: blocked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [580, 160],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 403,
+        "responseBody": "={{ JSON.stringify({ allowed: false, reason: $json.reason }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Compliant hours webhook": {
+      "main": [[{ "node": "Fetch Location", "type": "main", "index": 0 }]]
+    },
+    "Fetch Location": {
+      "main": [[{ "node": "Check compliant hours", "type": "main", "index": 0 }]]
+    },
+    "Check compliant hours": {
+      "main": [[{ "node": "In window?", "type": "main", "index": 0 }]]
+    },
+    "In window?": {
+      "main": [
+        [{ "node": "Respond: allowed (in window)", "type": "main", "index": 0 }],
+        [{ "node": "Fetch ConsentRecords", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch ConsentRecords": {
+      "main": [[{ "node": "Check consent evidence", "type": "main", "index": 0 }]]
+    },
+    "Check consent evidence": {
+      "main": [[{ "node": "Consent verified?", "type": "main", "index": 0 }]]
+    },
+    "Consent verified?": {
+      "main": [
+        [{ "node": "Respond: allowed (off-hours, verified)", "type": "main", "index": 0 }],
+        [{ "node": "Respond: blocked", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

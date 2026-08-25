@@ -1,10 +1,31 @@
-# Phase 3 — Dialer Hopper/Queue Logic (all four catalog entries scaffolded)
+# Phase 3 — Dialer Hopper/Queue Logic (all four brief-numbered entries scaffolded, plus one new gate)
 
-All four of Phase 3's catalog entries are now built. W3.1/W3.2 (the hopper/queue itself) were
-blocked on a design question, not a technical one — resolved this pass by Jonathan's explicit
-hopper-semantics call, now locked into `CRM-OBJECT-MODEL.md`'s **Rep**, **Campaign**, and
-**HopperEntry** objects. Read that file's object sections before this one; the summary below assumes
-them.
+All four of Phase 3's brief-numbered catalog entries are built, plus one new workflow (W3.5) added
+this pass as part of the compliance layer. W3.1/W3.2 (the hopper/queue itself) were blocked on a
+design question, not a technical one — resolved by Jonathan's explicit hopper-semantics call, now
+locked into `CRM-OBJECT-MODEL.md`'s **Rep**, **Campaign**, and **HopperEntry** objects. Read that
+file's object sections (plus its **Compliance layer** section for this pass's additions) before this
+one; the summary below assumes them.
+
+## W3.5 — `pacing-controller.workflow.json` (new this pass, not in the brief's own numbering)
+
+Enforces the "keep the abandonment/drop rate in check" half of the compliance ask — per Jonathan's
+explicit choice, this is **fully automatic, no manual pacing control by anyone** (not the agent, not
+Command Center) during a live campaign. Called on every call outcome (`Connected`/`Abandoned`/
+`Other` — `Other` isn't pacing-relevant and is a no-op), it maintains an exponential-moving-average
+`rollingAbandonmentRate` on the Campaign and ratchets `currentAllowedSimultaneousCallsPerAgent`
+down on any breach of `targetAbandonmentRateBp` (seeded at 300bp/3%, the FTC TSR's own ceiling —
+flagged for compliance-owner/counsel confirmation) and up only once the rate is comfortably under
+target, capped at `maxSimultaneousCallsPerAgentCeiling` — the one value a human (an admin) actually
+sets, once per Campaign, before it runs. Errs toward compliance safety over throughput on purpose:
+throttles down on any breach, ramps up conservatively.
+
+**Not wired to anything live yet**, same status W3.3/W3.4 had before W3.1/W3.2 existed: it needs the
+live-dial engine (Phase 5, Telnyx-gated, not built) to actually tag call outcomes as `Connected`/
+`Abandoned` (specifically, "connected but no agent greeted within the compliance threshold" is a
+live-dialer concept this repo's disposition schema doesn't produce) and to read
+`currentAllowedSimultaneousCallsPerAgent` back off the Campaign before opening lines. The decision
+and persistence logic itself is real and ready.
 
 ## The model, in one paragraph
 
@@ -54,9 +75,18 @@ Presence) enforced via Anthropic's Structured Outputs (`output_config.format`, a
 still show. `cache_control` on the static system instructions, per the brief's prompt-caching rule;
 the per-call transcript is the only thing that varies per request.
 
-**This pass:** the Disposition enum's `Connected-CallbackRequested` value was replaced with a plain
+**Last pass:** the Disposition enum's `Connected-CallbackRequested` value was replaced with a plain
 top-level `Callback`, matching the Callback vs. Try-back distinction above — a callback request isn't
 a flavor of "Connected," it's its own routing outcome with different hopper semantics.
+
+**This pass:** added a 5th structured-output key, `Rebuttal After Decline` (boolean) — the global
+no-rebuttal compliance policy's QA signal (see `CRM-OBJECT-MODEL.md`'s Compliance layer: enforced as
+a standing script rule for every call regardless of state, not a state-keyed legal list). Written
+onto the Opportunity as `lastCallRebuttalFlag`, and when true, fires a `warning`-severity internal
+alert through the real alert-dispatcher (W2.4) so a compliance reviewer sees it — fire-and-forget
+relative to the webhook's response, same pattern as W1.6's Location-status-update branch. This
+doesn't take any disciplinary or external action itself, per the automation risk boundary — it only
+surfaces a possible violation for a human to review.
 
 **Worth reconsidering:** this uses `claude-opus-5` to stay consistent with every other Claude call in
 this repo, but post-call synthesis runs on every single call rather than once per lead the way Deep
@@ -83,20 +113,22 @@ with a 90-120 day gap between waves.
   (an unrecognized disposition — nothing safe to write, a human needs to look first, so the entry is
   left exactly as claimed rather than touched).
 
-Input contract, updated this pass: `{hopperEntryId, opportunityId, disposition,
+Input contract, updated last pass: `{hopperEntryId, opportunityId, disposition,
 attemptCountThisWave, wave, lastAttemptDate, repId}` — `hopperEntryId` and `repId` are new, needed so
 a `Callback` locks to the rep who actually took the call and so there's a real row to write the
 decision onto.
 
-**Now wired to something live**, unlike last pass: W3.1/W3.2 give this workflow real HopperEntry
+**Now wired to something live**, unlike two passes ago: W3.1/W3.2 give this workflow real HopperEntry
 state to read and write instead of a caller with nowhere real to send `attemptCountThisWave`/`wave`/
 `lastAttemptDate` from.
 
 ## What's still not built
 
-Nothing in Phase 3's own catalog. What Phase 3 depends on and doesn't build itself: real call
-placement and live call-event data (Phase 5, Telnyx-gated), the dialer UI/softphone layer that
-actually calls W3.1/W3.4/W3.3 in sequence (not part of this repo's n8n workflow library — see
-`CRM-OBJECT-MODEL.md`'s Rep object note on `sipExtension`/local-presence dialing being Telnyx-gated
-too), and Twenty CRM's real REST response shapes for `hopperEntries`/`campaigns` (same
+Nothing in Phase 3's own brief-numbered catalog. What Phase 3 depends on and doesn't build itself:
+real call placement and live call-event data (Phase 5, Telnyx-gated), the dialer UI/softphone layer
+that actually calls W3.1/W3.4/W3.3/W3.5 (and W2.6/W2.7's gates) in sequence (not part of this repo's
+n8n workflow library — see `CRM-OBJECT-MODEL.md`'s Rep object note on `sipExtension`/local-presence
+dialing being Telnyx-gated too), a real state/zip → timezone lookup for W2.7's calling-hours check
+(currently server-local-hour, flagged as a known limitation in that workflow's own notes), and
+Twenty CRM's real REST response shapes for `hopperEntries`/`campaigns`/`consentRecords` (same
 sandbox-wide caveat as every workflow here — see `workflows/README.md`).

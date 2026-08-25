@@ -1,0 +1,131 @@
+{
+  "name": "Orbit AI - Phase 3 - Pacing controller (W3.5, new - not in the brief's original numbering)",
+  "nodes": [
+    {
+      "id": "e6f939b0-5fd7-48d6-9607-5c7ea5455934",
+      "name": "Pacing update webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-900, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pacing-controller",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Meant to be called once per call outcome, alongside W3.3/W3.4 (same post-call event, different concern - queue state vs. dialer-safety pacing). Input contract: {campaignId, callOutcome: 'Connected' | 'Abandoned' | 'Other'}. 'Abandoned' specifically means the call connected to a live person but no agent greeted them within the compliance threshold - a live-dialer-engine concept this repo's disposition schema (W3.4) doesn't produce yet, since Phase 5/Telnyx isn't built. This workflow assumes its eventual caller (the live-dial engine) tags outcomes correctly; it is pure pacing decision logic, same 'correct logic waiting on a real caller' status W3.3 had before W3.1/W3.2 existed."
+    },
+    {
+      "id": "c8957229-72ba-4fd7-917f-f99d80c708f3",
+      "name": "Fetch Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-660, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/campaigns/{{ $json.body.campaignId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Reads the Campaign's current pacing state (targetAbandonmentRateBp, maxSimultaneousCallsPerAgentCeiling, currentAllowedSimultaneousCallsPerAgent, rollingAbandonmentRate - all new fields this pass, CRM-OBJECT-MODEL.md's Campaign object)."
+    },
+    {
+      "id": "4a3f915d-4dad-46e8-9419-4e9acd7ecf69",
+      "name": "Compute new pacing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-420, 0],
+      "parameters": {
+        "jsCode": "const input = $('Pacing update webhook').item.json.body;\nconst { callOutcome } = input;\nconst campaign = $('Fetch Campaign').item.json;\n\n// 300bp (3%) is the FTC TSR's own abandonment-rate ceiling, seeded as the default target -\n// flagged for compliance-owner/counsel confirmation before launch (CRM-OBJECT-MODEL.md's\n// Compliance layer section), same treatment as every other legally-consequential default here.\nconst targetBp = campaign.targetAbandonmentRateBp ?? 300;\nconst ceiling = campaign.maxSimultaneousCallsPerAgentCeiling ?? 1;\nconst currentAllowed = campaign.currentAllowedSimultaneousCallsPerAgent ?? ceiling;\nconst priorRateBp = campaign.rollingAbandonmentRate ?? 0;\n\n// Only Connected/Abandoned outcomes are pacing-relevant - a NoAnswer/Busy/etc never reached a\n// live person, so it never counts toward an abandonment rate at all.\nif (callOutcome !== 'Connected' && callOutcome !== 'Abandoned') {\n  return [{\n    json: {\n      changed: false,\n      action: 'IGNORED',\n      rollingAbandonmentRate: priorRateBp,\n      currentAllowedSimultaneousCallsPerAgent: currentAllowed,\n      reason: `callOutcome \"${callOutcome}\" isn't pacing-relevant (not Connected or Abandoned) - no update.`,\n    },\n  }];\n}\n\n// Exponential moving average, not a true rolling window - there's no per-call event log to\n// average over yet (Communications Hub, W2.5, isn't built). Weights the newest outcome at 5%,\n// smooths out single-call noise while still reacting within a few dozen calls. Revisit once real\n// call-event history exists to compute a true windowed rate instead of this approximation.\nconst ALPHA = 0.05;\nconst outcomeBp = callOutcome === 'Abandoned' ? 10000 : 0;\nconst newRateBp = Math.round(priorRateBp * (1 - ALPHA) + outcomeBp * ALPHA);\n\nlet newAllowed = currentAllowed;\nlet action = 'HOLD';\nif (newRateBp > targetBp) {\n  newAllowed = Math.max(1, currentAllowed - 1);\n  action = 'THROTTLE_DOWN';\n} else if (newRateBp < targetBp * 0.5 && currentAllowed < ceiling) {\n  newAllowed = Math.min(ceiling, currentAllowed + 1);\n  action = 'RAMP_UP';\n}\n\nreturn [{\n  json: {\n    changed: true,\n    action,\n    rollingAbandonmentRate: newRateBp,\n    targetAbandonmentRateBp: targetBp,\n    currentAllowedSimultaneousCallsPerAgent: newAllowed,\n    maxSimultaneousCallsPerAgentCeiling: ceiling,\n    reason: `${action} - rolling rate ${newRateBp}bp vs target ${targetBp}bp.`,\n  },\n}];"
+      },
+      "notes": "No manual pacing control anywhere in this workflow, by design (locked, CRM-OBJECT-MODEL.md's Compliance layer) - the only human-set value is maxSimultaneousCallsPerAgentCeiling, read from the Campaign, never written here. Ramps down aggressively (any breach throttles) and ramps up conservatively (needs the rate at half the target, not just under it) - erring toward compliance safety over dialing throughput, consistent with why this exists."
+    },
+    {
+      "id": "30e34434-6223-432c-9c53-7bfeddc52d7d",
+      "name": "Changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-180, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.changed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "An 'Other' (non-pacing-relevant) callOutcome sets changed: false - nothing to persist, straight to Respond. Same 'skip the write when there's nothing real to write' pattern as W3.3's 'Needs a write?' node."
+    },
+    {
+      "id": "aac46342-7ccb-4316-a319-c4be0b4f4835",
+      "name": "Write Campaign pacing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [60, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/campaigns/{{ $('Pacing update webhook').item.json.body.campaignId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rollingAbandonmentRate: $json.rollingAbandonmentRate, currentAllowedSimultaneousCallsPerAgent: $json.currentAllowedSimultaneousCallsPerAgent }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "The live-dial engine (Phase 5, not built) is expected to read currentAllowedSimultaneousCallsPerAgent off the Campaign before deciding how many lines to open per agent - this workflow only maintains that number, it doesn't itself enforce it against any live call."
+    },
+    {
+      "id": "99c3b197-550f-423d-ba37-e61270f9ce1d",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [300, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Compute new pacing').item.json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Pacing update webhook": {
+      "main": [[{ "node": "Fetch Campaign", "type": "main", "index": 0 }]]
+    },
+    "Fetch Campaign": {
+      "main": [[{ "node": "Compute new pacing", "type": "main", "index": 0 }]]
+    },
+    "Compute new pacing": {
+      "main": [[{ "node": "Changed?", "type": "main", "index": 0 }]]
+    },
+    "Changed?": {
+      "main": [
+        [{ "node": "Write Campaign pacing", "type": "main", "index": 0 }],
+        [{ "node": "Respond", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Campaign pacing": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

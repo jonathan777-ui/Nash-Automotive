@@ -108,6 +108,7 @@ wrong, every workflow here that "writes to the Demo Dashboard" needs its target 
 | W2.4 | Alerts/notifications | Event-driven (high-value lead, no-show, overdue nurture touch, scraper batch ready) | Auto (internal alert, not external send) | **Scaffolded** — `phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json`. Routes to Google Chat + Command Center in-app (both real) + SMS on critical (still a placeholder — no provider in `02 - Launch Checklist`) — see that folder's README. |
 | W2.5 | Communications Hub write-through | Every Call/SMS/Social/Other touchpoint | Auto (internal, reversible logging) | Documented only |
 | W2.6 | DNC enforcement | Permission check at the dialer action layer | **Hard gate** — not just a UI hide, a block requiring logged admin override for an exception call | **Scaffolded** (action-layer block only; the role-based UI hide is a Twenty CRM permissions config, not a workflow) — `phase-2-calendar-nurture-alerts/dnc-check.workflow.json` |
+| W2.7 | Compliant hours + off-hours consent gate (new, not in the brief's own numbering) | Permission check at the dialer action layer, alongside W2.6 | **Hard gate** — blocks outside TCPA-floor calling hours unless a system-checked + human-verified ConsentRecord is on file | **Scaffolded** — `phase-2-calendar-nurture-alerts/compliant-hours-consent-gate.workflow.json` |
 
 Not scaffolded yet: W2.1 needs the calendar's actual event schema and the System-Scheduled vs.
 Human-Scheduled tagging convention decided against a real Google Calendar setup; W2.2/W2.3 need the
@@ -134,8 +135,18 @@ names `restrictionReason` (DNC/Not Interested/Bad Information) as a field on the
 — see `phase-2-calendar-nurture-alerts/dnc-check.workflow.json`. The role-based UI-hiding half is
 still a Twenty CRM permissions config, not a workflow, so it's not represented here.
 
-Four of six Phase 2 automations are real and buildable once their remaining specifics exist —
-cataloged here so none of them are lost, not because any is hard.
+**W2.7 (new — not part of the brief's own W-numbering, added per Jonathan's explicit compliance
+request).** Same hard-gate pattern as W2.6, meant to run alongside it: blocks an outbound call
+outside TCPA's federal 8am-9pm (called party's local time) floor — narrowed per state where one sets
+a tighter window, table currently seeded empty rather than guessed — unless a **ConsentRecord** (new
+object, `CRM-OBJECT-MODEL.md`) proves the contact directly asked to be called off-hours, checked by
+the system (a real evidence reference — recording ID, email, or SMS message ID) *and* confirmed by a
+human. See `phase-2-calendar-nurture-alerts/README.md` for the known server-local-hour limitation
+(no real timezone lookup yet).
+
+Two of Phase 2's six brief-numbered automations (W2.4, W2.6) are scaffolded, plus this pass's new
+W2.7 compliance gate — the rest remain cataloged here, blocked on undecided specifics rather than
+difficulty, so none of the brief's own six are lost.
 
 ## Phase 3 — Dialer Hopper/Queue Logic (pre-Telnyx)
 
@@ -144,7 +155,8 @@ cataloged here so none of them are lost, not because any is hard.
 | W3.1 | Dialer hopper request (claim next entry) | Agent action (pull from pool) | Auto (internal) | **Scaffolded** — `phase-3-dialer-hopper/hopper-request-next.workflow.json` |
 | W3.2 | Load Campaign hopper | Manual/scraper handoff (batch of Opportunities to dial) | Auto (internal) | **Scaffolded** — `phase-3-dialer-hopper/hopper-load-campaign.workflow.json` |
 | W3.3 | Attempt/recycling matrix | Post-call, per attempt | Auto (internal scheduling logic) | **Scaffolded**, with the brief's actual numbers hard-coded (not placeholders) — `phase-3-dialer-hopper/attempt-recycling-matrix.workflow.json` |
-| W3.4 | Post-call synthesis (strict 4-key JSON) | Call disposition event | Auto (internal — produces structured data, not an external send) | **Scaffolded**, using Claude Structured Outputs for the brief's exact 4-key contract — `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
+| W3.4 | Post-call synthesis (strict 4-key JSON, now 5-key) | Call disposition event | Auto (internal — produces structured data, not an external send) | **Scaffolded**, using Claude Structured Outputs for the brief's 4-key contract plus a 5th compliance key added this pass — `phase-3-dialer-hopper/post-call-synthesis.workflow.json` |
+| W3.5 | Pacing controller (new, not in the brief's own numbering) | Call outcome event, alongside W3.3/W3.4 | Auto (internal — no manual pacing control by anyone, per Jonathan's explicit choice) | **Scaffolded** — `phase-3-dialer-hopper/pacing-controller.workflow.json` |
 
 **Explicit correction already captured in the roadmap itself:** this phase is data/workflow layer
 only — no live call placement happens here (that's Phase 5, gated on Telnyx).
@@ -161,16 +173,25 @@ personal Callback first, else the oldest-wave shared-pool candidate), with an ex
 read-then-write race-condition risk (two reps could select the same entry before either claim lands)
 mitigated but not eliminated by a re-read-and-verify step. See `phase-3-dialer-hopper/README.md`.
 
-**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded last pass, extended this pass.** The
+**W3.3/W3.4 (from 05 §4 — Dialer & Outreach) — scaffolded two passes ago, extended since.** The
 attempt matrix's actual numbers are given by the brief (6 attempts no-answer, 4 busy, 8 gatekeeper,
 hard-stop on opt-out, 4-wave 90-120 day recycling) and post-call synthesis's exact output contract is
 given (a strict 4-key JSON: Disposition, Summary, Try-Back Time, DM Presence, enforced via Claude's
-Structured Outputs). **This pass:** W3.3 now also decides and persists the resulting HopperEntry
-state (`status`/`claimedByRepId`/`nextEligibleAt`, via a new PATCH node) instead of only computing
-and responding with a decision, and gained explicit `Callback` → `CALLBACK_SCHEDULED`/rep-locked
-handling distinct from the existing Try-back recycling actions; W3.4's Disposition enum swapped
-`Connected-CallbackRequested` for a plain top-level `Callback` value to match. Both are now wired to
-the real hopper (W3.1/W3.2) rather than waiting on it. See `phase-3-dialer-hopper/README.md`.
+Structured Outputs). **Last pass:** W3.3 gained a real PATCH persisting the resulting HopperEntry
+state, plus explicit `Callback` → `CALLBACK_SCHEDULED`/rep-locked handling; W3.4's Disposition enum
+swapped `Connected-CallbackRequested` for a plain top-level `Callback` value to match. **This pass:**
+W3.4 gained a 5th structured-output key, `Rebuttal After Decline` — the global no-rebuttal
+compliance policy's QA signal, written onto the Opportunity and, when true, fired as an internal
+alert through the real alert-dispatcher (W2.4) for a compliance reviewer. Both W3.3/W3.4 are wired to
+the real hopper (W3.1/W3.2) rather than waiting on it.
+
+**W3.5 (new, not in the brief's own numbering) — added this pass as the compliance layer's pacing
+half.** Per Jonathan's explicit choice, dialer pacing (simultaneous calls per agent, dial speed) is
+fully automatic — no manual control by agent or Command Center during a live campaign. This workflow
+watches a rolling abandonment rate per Campaign (the FTC TSR's 3% ceiling seeded as the default
+target, flagged for counsel confirmation) and ratchets `currentAllowedSimultaneousCallsPerAgent`
+against it, capped at an admin-set `maxSimultaneousCallsPerAgentCeiling` — the only human lever, set
+once per Campaign, not adjusted call-by-call. See `phase-3-dialer-hopper/README.md`.
 
 ## Phase 4 — Intelligence Layer
 

@@ -14,7 +14,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "notes": "The agent-facing 'give me the next lead to dial' action. Input contract: {repId: string, campaignId?: string} - campaignId is optional; when omitted, this pulls from the shared pool across every active Campaign (confirmed design: no multi-member campaign restriction, any available rep can pull from any campaign's hopper - see CRM-OBJECT-MODEL.md's Campaign object). A due Callback locked to this specific rep always takes priority over the shared pool - see 'Select candidate' below."
+      "notes": "The agent-facing 'give me the next lead to dial' action. Input contract: {repId: string, campaignId?: string} - campaignId is optional; when omitted, this pulls from the shared pool across every active Campaign (confirmed design: no multi-member campaign restriction, any available rep can pull from any campaign's hopper - see CRM-OBJECT-MODEL.md's Campaign object). A due Callback locked to this specific rep always takes priority over the shared pool - see 'Select candidate' below. IMPORTANT: claiming a HopperEntry here is NOT permission to dial - the live-dial layer (Phase 5, not built) still has to pass dnc-check.workflow.json (W2.6), compliant-hours-consent-gate.workflow.json (W2.7, new this pass), and read the Campaign's currentAllowedSimultaneousCallsPerAgent (pacing-controller.workflow.json, W3.5, new this pass) before actually placing the call. This workflow only manages queue ownership."
     },
     {
       "id": "b4348ec1-ef3f-431a-ba4f-845f74395e0a",

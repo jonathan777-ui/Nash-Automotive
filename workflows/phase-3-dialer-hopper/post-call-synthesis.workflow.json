@@ -27,7 +27,7 @@
         "url": "https://api.anthropic.com/v1/messages",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 1024, system: [{ type: 'text', text: 'You synthesize sales call transcripts into a strict 4-key summary for a CRM. Disposition must be one of: Connected-Interested, Connected-NotInterested, Callback, NoAnswer, Busy, GatekeeperOnly, WrongNumber, VoicemailLeft, OptOut. Callback (a lead asked for a specific personal follow-up) is its own value, not a Connected- prefixed one - it locks the record to this rep rather than the general Connected/no-contact split. \"Try-Back Time\" is a specific ISO datetime or null if none was given. \"DM Presence\" is true only if you spoke with the actual decision-maker, not a gatekeeper.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Call transcript/notes:\\n\\n' + $json.body.transcriptOrNotes }], output_config: { format: { type: 'json_schema', schema: { type: 'object', properties: { Disposition: { type: 'string' }, Summary: { type: 'string' }, 'Try-Back Time': { type: ['string', 'null'] }, 'DM Presence': { type: 'boolean' } }, required: ['Disposition', 'Summary', 'Try-Back Time', 'DM Presence'] } } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-opus-5', max_tokens: 1024, system: [{ type: 'text', text: 'You synthesize sales call transcripts into a strict 5-key summary for a CRM. Disposition must be one of: Connected-Interested, Connected-NotInterested, Callback, NoAnswer, Busy, GatekeeperOnly, WrongNumber, VoicemailLeft, OptOut. Callback (a lead asked for a specific personal follow-up) is its own value, not a Connected- prefixed one - it locks the record to this rep rather than the general Connected/no-contact split. \"Try-Back Time\" is a specific ISO datetime or null if none was given. \"DM Presence\" is true only if you spoke with the actual decision-maker, not a gatekeeper. \"Rebuttal After Decline\" is true only if the rep continued pitching/persuading after the lead gave a clear decline (\"no\", \"not interested\", \"stop calling\", etc.) rather than ending the call - this is a compliance flag, be conservative: a single clarifying question after an ambiguous response is not a rebuttal, a renewed sales pitch after an unambiguous no is.', cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: 'Call transcript/notes:\\n\\n' + $json.body.transcriptOrNotes }], output_config: { format: { type: 'json_schema', schema: { type: 'object', properties: { Disposition: { type: 'string' }, Summary: { type: 'string' }, 'Try-Back Time': { type: ['string', 'null'] }, 'DM Presence': { type: 'boolean' }, 'Rebuttal After Decline': { type: 'boolean' } }, required: ['Disposition', 'Summary', 'Try-Back Time', 'DM Presence', 'Rebuttal After Decline'] } } } }) }}",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "headers": {
@@ -64,7 +64,7 @@
         "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Post-call webhook').item.json.body.opportunityId }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ lastCallDisposition: $json.Disposition, lastCallSummary: $json.Summary, lastCallTryBackTime: $json['Try-Back Time'], lastCallDmPresence: $json['DM Presence'] }) }}",
+        "jsonBody": "={{ JSON.stringify({ lastCallDisposition: $json.Disposition, lastCallSummary: $json.Summary, lastCallTryBackTime: $json['Try-Back Time'], lastCallDmPresence: $json['DM Presence'], lastCallRebuttalFlag: $json['Rebuttal After Decline'] }) }}",
         "genericAuthType": "httpBearerAuth",
         "options": {}
       },
@@ -73,7 +73,7 @@
           "name": "Twenty CRM API"
         }
       },
-      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a sales call is about advancing a specific deal, so it stays Opportunity-anchored regardless of pre- or post-sale timing."
+      "notes": "A short structured summary written directly onto the Opportunity is CRM-native data (like the e-sign fields), not 'embedded live data from another tool' in the Opportunity Card sense - the full transcript itself should live in the Communications Hub (W2.5, not yet built) or wherever call recordings are stored, referenced by a link, not dumped here. Same Twenty CRM REST-shape uncertainty as every workflow in this library. CONFIRMED unchanged by the object model migration (CRM-OBJECT-MODEL.md): a sales call is about advancing a specific deal, so it stays Opportunity-anchored regardless of pre- or post-sale timing. lastCallRebuttalFlag is new this pass - the global no-rebuttal-after-decline compliance policy's QA signal, see CRM-OBJECT-MODEL.md's Compliance layer section."
     },
     {
       "id": "7c60cc42-4ebb-4518-987b-060f9eb02d6c",
@@ -85,6 +85,45 @@
         "respondWith": "json",
         "responseBody": "={{ JSON.stringify($json) }}"
       }
+    },
+    {
+      "id": "e5192883-57fa-4ad7-b9bc-f6a57f583d4c",
+      "name": "Rebuttal flagged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [20, 120],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Extract structured result').item.json['Rebuttal After Decline'] }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Fire-and-forget branch relative to 'Respond' (same pattern as W1.6's Location-status-update branch) - a flagged rebuttal doesn't need to block or slow the caller's response, it needs a compliance reviewer alerted."
+    },
+    {
+      "id": "675adf0d-cc79-4dad-89e8-2892de7621f0",
+      "name": "Alert: compliance review needed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'post-call-synthesis', message: 'Possible rebuttal-after-decline on Opportunity ' + $('Post-call webhook').item.json.body.opportunityId + ' (call ' + $('Post-call webhook').item.json.body.callId + ') - no-rebuttal is a global policy, needs a compliance review.' }) }}",
+        "options": {}
+      },
+      "notes": "Calls the real alert-dispatcher workflow (phase-2-calendar-nurture-alerts/alert-dispatcher.workflow.json) by its webhook path, same pattern as referral-trigger.workflow.json - internal alert, reversible, auto-executed per the automation risk boundary (this flags a possible violation for human review, it doesn't itself take any external or disciplinary action)."
     }
   ],
   "connections": {
@@ -98,7 +137,13 @@
       "main": [[{ "node": "Write to Opportunity", "type": "main", "index": 0 }]]
     },
     "Write to Opportunity": {
-      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+      "main": [
+        [{ "node": "Respond", "type": "main", "index": 0 }],
+        [{ "node": "Rebuttal flagged?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rebuttal flagged?": {
+      "main": [[{ "node": "Alert: compliance review needed", "type": "main", "index": 0 }]]
     }
   },
   "active": false,

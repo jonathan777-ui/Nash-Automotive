@@ -1,0 +1,151 @@
+{
+  "name": "Orbit AI - CRM Architecture - Location Contract Lock check (05 Section 13, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "40eb6338-cbc1-45fb-8421-bd0f4f96e0eb",
+      "name": "Location lock check webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1400, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "location-contract-lock-check",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "05 Section 13: 'each Location tracks contract status (None/Active M2M/Active Term+expiration). New Opportunity/Contract-generation on an already-active Location auto-blocks, routes to human review.' Input contract: {locationIds: string[], companyId?: string (the Company this deal would belong to, if known - null/omitted for a brand-new lead that hasn't resolved a Company yet), opportunityId}. Meant to be called from TWO points: (1) advisory, non-blocking, right after lead-intake-to-demo-dashboard.workflow.json (W1.1) resolves/creates a Location, so a conflict surfaces early rather than only at payment time; (2) hard-blocking, right before stripe-payment-to-crm.workflow.json (W1.6) creates a new Contract, since that's the actual 'Contract-generation' moment the spec names."
+    },
+    {
+      "id": "eee6a9e4-b6b5-4ce4-a862-397e2099740d",
+      "name": "Split locationIds",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-1160, 0],
+      "parameters": {
+        "fieldToSplitOut": "body.locationIds"
+      },
+      "notes": "Same Split Out + per-item fetch + single aggregating Code node pattern used throughout this library (e.g. hopper-load-campaign.workflow.json) rather than a filter query across multiple Location IDs, since Twenty CRM's REST filter support for an 'IN' style match isn't confirmed."
+    },
+    {
+      "id": "840d13ac-9d68-49fd-8ab7-e27b3a17f61c",
+      "name": "Fetch Location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-920, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.body.locationIds }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Runs once per split item, per n8n's default per-item execution for an HTTP Request node fed by Split Out - produces one output item per Location, all of which the next Code node receives together via $input.all() (Code node's default 'run once for all items' mode)."
+    },
+    {
+      "id": "93e3a325-2b18-4a19-8714-704779bebba3",
+      "name": "Evaluate lock conflicts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-680, 0],
+      "parameters": {
+        "jsCode": "const ACTIVE_STATUSES = ['ActiveM2M', 'ActiveTerm'];\nconst incomingCompanyId = $('Location lock check webhook').item.json.body.companyId || null;\n\nconst locations = $input.all().map((item) => item.json);\n\n// The distinguishing rule from 05 Section 13, stated explicitly: a change originating from the\n// SAME Company already holding an active Contract on this Location is Contract Amendment territory\n// (a different workflow, contract-amendment-flow.workflow.json), NOT a Lock block. A Lock block is\n// specifically an unrelated/different Company trying to generate a new Contract against a Location\n// someone else already has active.\nconst conflicts = [];\nconst amendmentCandidates = [];\n\nfor (const loc of locations) {\n  if (!ACTIVE_STATUSES.includes(loc.contractStatus)) continue;\n  if (incomingCompanyId && loc.companyId === incomingCompanyId) {\n    amendmentCandidates.push({ locationId: loc.id, contractStatus: loc.contractStatus });\n  } else {\n    conflicts.push({ locationId: loc.id, contractStatus: loc.contractStatus, heldByCompanyId: loc.companyId });\n  }\n}\n\nreturn [{\n  json: {\n    blocked: conflicts.length > 0,\n    conflicts,\n    amendmentCandidates,\n    reason: conflicts.length > 0\n      ? `${conflicts.length} Location(s) already under an active Contract held by a different Company - routes to human review, does not auto-proceed.`\n      : amendmentCandidates.length > 0\n        ? `${amendmentCandidates.length} Location(s) already under an active Contract held by the SAME Company - this is Contract Amendment territory, not a new Contract. Route to contract-amendment-flow.workflow.json instead of creating a new one.`\n        : 'No active Contract conflicts on any named Location.',\n  },\n}];"
+      },
+      "notes": "The one piece of real decision logic in this workflow - everything else is plumbing around it. Deliberately returns amendmentCandidates even when not blocked, so a caller that gets 'allowed' back still knows whether it should be calling contract-amendment-flow.workflow.json instead of blindly creating a brand-new Contract (stripe-payment-to-crm.workflow.json's own 'new-logo path only' note flags exactly this gap)."
+    },
+    {
+      "id": "08de12f9-086d-4000-b8a9-a64918e7f1fa",
+      "name": "Blocked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-440, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.blocked }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3c20649f-6830-48c6-a9a9-f8956b2624e1",
+      "name": "Alert: Location Contract Lock conflict",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'warning', source: 'location-contract-lock-check', message: 'Location Contract Lock conflict on Opportunity ' + $('Location lock check webhook').item.json.body.opportunityId + ': ' + $json.reason, linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/opportunity/' + $('Location lock check webhook').item.json.body.opportunityId }) }}",
+        "options": {}
+      },
+      "notes": "'Location Contract Lock conflict' is explicitly named as one of 05 Section 11's alert triggers - not an invented severity/routing choice. linkUrl (Command Center's primary-surface deep link, Step 3) points at a guessed Twenty CRM record URL pattern - unconfirmed, same REST-shape uncertainty as everything else, but a reasonable guess rather than omitting the link entirely."
+    },
+    {
+      "id": "07094a97-4630-42a6-ba6e-6a9be3e5f181",
+      "name": "Respond: blocked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [40, -100],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 409,
+        "responseBody": "={{ JSON.stringify({ allowed: false, conflicts: $json.conflicts, reason: $json.reason }) }}"
+      },
+      "notes": "409, not 403 - this isn't a permissions failure, it's a genuine state conflict (an already-active Contract) that a human resolving the conflict can clear, same conceptual shape as the dialer hopper's claim-race 409."
+    },
+    {
+      "id": "e8daebc3-5ecf-420f-bb7e-d1f9946f0a25",
+      "name": "Respond: allowed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-200, 100],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ allowed: true, amendmentCandidates: $json.amendmentCandidates, reason: $json.reason }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Location lock check webhook": {
+      "main": [[{ "node": "Split locationIds", "type": "main", "index": 0 }]]
+    },
+    "Split locationIds": {
+      "main": [[{ "node": "Fetch Location", "type": "main", "index": 0 }]]
+    },
+    "Fetch Location": {
+      "main": [[{ "node": "Evaluate lock conflicts", "type": "main", "index": 0 }]]
+    },
+    "Evaluate lock conflicts": {
+      "main": [[{ "node": "Blocked?", "type": "main", "index": 0 }]]
+    },
+    "Blocked?": {
+      "main": [
+        [{ "node": "Alert: Location Contract Lock conflict", "type": "main", "index": 0 }],
+        [{ "node": "Respond: allowed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Alert: Location Contract Lock conflict": {
+      "main": [[{ "node": "Respond: blocked", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

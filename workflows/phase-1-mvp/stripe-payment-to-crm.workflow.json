@@ -93,6 +93,63 @@
       "notes": "NEW (object model migration, CRM-OBJECT-MODEL.md): reads the Opportunity's locationIds and companyName so the Company/Contract creation below has real data to work from, rather than guessing. This is where the funnel object (Opportunity) hands off to the client-relationship object (Company/Contract) - the single most structurally significant change in this pass."
     },
     {
+      "id": "e1296dfa-e729-4597-a200-cf000a9fe219",
+      "name": "Check Location Contract Lock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, -180],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/location-contract-lock-check",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ locationIds: ($json.data || $json).locationIds, opportunityId: $('Verify signature & classify event').item.json.opportunityId }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notes": "NEW this pass, real wiring (not just documented) - unlike DNC/compliant-hours' gates, whose caller is the not-yet-built live-dial engine, THIS gate's caller (this exact workflow) already exists in this repo, so there's no reason to leave it unwired. companyId is deliberately omitted - this is the new-logo Stripe path, no existing Company to compare against, so location-contract-lock-check.workflow.json will only ever find an UNRELATED-company conflict here, never an Amendment candidate. neverError:true is required so a 409 response comes back as normal data to branch on, not a thrown node error routing to errorWorkflow - the whole point is to branch cleanly, not treat 'blocked' as an unexpected failure."
+    },
+    {
+      "id": "a0ecc416-296b-4b61-a6f0-fc219c793f46",
+      "name": "Lock check allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-200, -80],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "533b8396-78a1-414b-bd40-2a4f92718e59",
+      "name": "Respond: blocked by Location lock",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [40, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 200,
+        "responseBody": "={{ JSON.stringify({ ok: true, handled: false, reason: 'Location Contract Lock conflict - routed to human review, no Contract created.', conflicts: $json.conflicts }) }}"
+      },
+      "notes": "Responds 200/ok:true to STRIPE (the payment already succeeded - Stripe doesn't care about internal CRM conflicts and shouldn't retry this webhook), NOT the location-contract-lock-check's own 409 - that distinction matters, this is a different HTTP boundary. The actual alert ('Location Contract Lock conflict', 05 Section 11) already fired from inside location-contract-lock-check.workflow.json itself, so this node doesn't duplicate it - a human now has to resolve the conflict manually; nothing here retries or auto-resolves, per the automation risk boundary's billing/contract-stage human gate."
+    },
+    {
       "id": "5c382c54-9cef-43e1-90ce-3e14e6146a9a",
       "name": "Create Company",
       "type": "n8n-nodes-base.httpRequest",
@@ -269,7 +326,16 @@
       ]
     },
     "Fetch Opportunity": {
-      "main": [[{ "node": "Create Company", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Check Location Contract Lock", "type": "main", "index": 0 }]]
+    },
+    "Check Location Contract Lock": {
+      "main": [[{ "node": "Lock check allowed?", "type": "main", "index": 0 }]]
+    },
+    "Lock check allowed?": {
+      "main": [
+        [{ "node": "Create Company", "type": "main", "index": 0 }],
+        [{ "node": "Respond: blocked by Location lock", "type": "main", "index": 0 }]
+      ]
     },
     "Create Company": {
       "main": [[{ "node": "Create Contract", "type": "main", "index": 0 }]]

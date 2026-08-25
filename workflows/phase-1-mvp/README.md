@@ -1,10 +1,43 @@
 # Phase 1 — MVP: Lead → Onboarding
 
-Four scaffolded workflows, in the order a lead actually moves through them. **Updated against brief
-v2 / `02 - Launch Checklist` v2** — Front Door Audit added, Documenso replaced with lightweight
-inline e-sign, Stripe pulled forward into Phase 1. See `workflows/README.md` for W1.3 and W1.5
-(still documented-only — blocked on the Proposal document format and the Onboarding Form's field
-schema, neither of which is specified yet).
+Four scaffolded workflows, in the order a lead actually moves through them, plus three new
+CRM-Architecture workflows added this pass (not brief-W-numbered — named in `05 §7/§13/§15`, not the
+roadmap's own W-list). **Updated against brief v2 / `02 - Launch Checklist` v2** — Front Door Audit
+added, Documenso replaced with lightweight inline e-sign, Stripe pulled forward into Phase 1. See
+`workflows/README.md` for W1.3 and W1.5 (still documented-only — blocked on the Proposal document
+format and the Onboarding Form's field schema, neither of which is specified yet).
+
+## New this pass — the Contract lifecycle, closed out for real
+
+`05 §13`'s Location Contract Lock and Contract Amendment Flow were both named since an early pass but
+explicitly deferred as "Step 2/3 work." With the full spec re-confirmed against the source doc, both
+are built now, plus the steady-state Billing Period rollover `05 §15` needs and W1.6 never built:
+
+- **`location-contract-lock-check.workflow.json`** — a synchronous gate (same family as W2.6/W2.7):
+  given a set of Location IDs and (optionally) the Company a deal would belong to, blocks when any
+  Location already has an active Contract held by a **different** Company, and separately flags
+  ("amendment candidates") when one's held by the **same** Company — the exact distinguishing rule
+  the spec states. Fires the `05 §11`-named "Location Contract Lock conflict" alert on a block.
+  **Wired for real into W1.6 below** (see that section) — unlike W2.6/W2.7, whose caller is the
+  not-yet-built live-dial engine, this gate's caller already exists in this repo.
+- **`contract-amendment-flow.workflow.json`** — the full flow for an EXISTING Company's Contract
+  change: supersedes the old Contract (`status: 'Superseded'`, `supersededByContractId` set, never
+  deleted), creates a new Contract version with recalculated Total/Agreement Value, writes a new
+  **AccountingAuditEvent** (new object — see `CRM-OBJECT-MODEL.md`) logging old→new Contract IDs and
+  before/after values, advances the driving Opportunity's stage to **`Expansion`** (a distinct bucket
+  from the new-logo Won funnel, per spec), rolls the Billing Period over to the new Contract, and
+  fires the `05 §11`-named "Contract Amendment logged" alert into `#accounting` (`05 §14`'s new
+  channel). Not yet called from anywhere in this repo — nothing here has a Deals Desk-style upsell UI
+  yet (see the tracked Deals Desk task); this is real, callable logic waiting on that caller.
+- **`billing-period-rollover.workflow.json`** — schedule-triggered (daily), the third leg Billing
+  Period needed: for every *unchanged* active Contract (not being amended), auto-creates the next
+  monthly period once the current one's `periodEnd` passes. W1.6 creates period #1 on Won;
+  `contract-amendment-flow.workflow.json` closes/reopens a period on an Amendment; this covers
+  everything else, so no active Contract can ever run out of a current Billing Period.
+
+All three share the same `revenueCents: 0`-on-creation simplification W1.6 already had: real revenue
+linkage needs a recurring-charge Stripe webhook this repo doesn't wire up anywhere (only the initial
+Checkout Session is handled) — flagged consistently, not solved three different ways.
 
 ## W1.1 — `lead-intake-to-demo-dashboard.workflow.json`
 
@@ -117,11 +150,17 @@ What changed:
   Contract Lock will check once its enforcement workflow is built (not this pass).
 - A first Billing/Accounting Period record is created (`05 §15`, new in v4) so nothing downstream
   has to special-case "no billing period yet" the moment a client goes live. Recurring monthly
-  generation, COGS breakdown, and commission calculation are explicitly not built this pass.
-- **New-logo path only.** This workflow always creates a fresh Company — an existing Company adding
-  a Location or changing tier is Contract Amendment Flow (`05/06`, new in v4), explicitly scoped as
-  Step 2/3 work, not built here. If this ever fires for an existing client, it will incorrectly
-  create a duplicate Company; flagged in the node's own `notes` rather than silently handled.
+  generation is now `billing-period-rollover.workflow.json` (above); COGS breakdown and commission
+  *calculation* (as opposed to the `commissionStatus` lifecycle field, which exists) remain not
+  built — no per-client usage-cost data exists anywhere in this repo yet to calculate them from.
+- **New-logo path only, and now enforced, not just noted.** This workflow always creates a fresh
+  Company — an existing Company adding a Location or changing tier is Contract Amendment Flow
+  (`contract-amendment-flow.workflow.json`, above), built this pass. **`Check Location Contract
+  Lock`/`Lock check allowed?`** (new nodes, right after `Fetch Opportunity`) call
+  `location-contract-lock-check.workflow.json` for real before any Company/Contract gets created —
+  if a named Location already has an active Contract under an unrelated Company, this workflow now
+  responds `ok:true, handled:false` to Stripe (the payment itself isn't retried) and stops, leaving
+  the conflict for a human to resolve, instead of silently creating a duplicate/conflicting Company.
 - Tier is now reverse-derived from the paid amount against the brief's own known tier prices, since
   the portal doesn't currently pass a `tier` field in Stripe metadata (only `opportunityId`) —
   avoided a second coordinated change to `portal/` for this.

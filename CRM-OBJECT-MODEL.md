@@ -144,6 +144,32 @@ Contract all along.
 
 ## Objects
 
+### Opportunity
+The pre-sale funnel object — see "The load-bearing distinction" above. Given its own section this
+pass (it never had one despite being the single most-referenced object here) since its stage enum
+kept growing across passes without a canonical list.
+
+- Fields: `id`, `companyName` (pre-Company-creation business name), `locationIds` (array — an
+  Opportunity can span multiple Locations), `stage` (`DemoQueue` / `PendingDemos` / `NoShow` /
+  `Rescheduled` / `DemoCompleted` / `FutureFollowUp` / `Won` / `Lost` / `Expansion` — the last is new
+  this pass, set by `contract-amendment-flow.workflow.json` on an EXISTING client's upsell deal, not
+  part of the new-logo Demo-Queue-through-Won sequence), `paymentStatus`, `onboardingProvisioningStatus`,
+  `companyId` (nullable — set once Won), `contractId` (nullable — set once Won or Amended),
+  `restrictionReason` (`DNC` / `Not Interested` / `Bad Information`, nullable — post-loss routing),
+  `postLossTrack` (`Nurture` / `Restricted`, nullable), `lastCallDisposition` (rep-entered, see
+  `call-wrap-up.workflow.json`), `lastCallDispositionAiSuggested`/`lastCallSummary`/
+  `lastCallTryBackTime`/`lastCallDmPresence`/`lastCallRebuttalFlag` (all from
+  `post-call-synthesis.workflow.json`), `deepDiveResearchStatus`, `frontDoorAuditStatus` (mirrors
+  each spanned Location's own, see Location below), `openingLineId` (nullable — which Deep Dive
+  Research opening-line recommendation this lead got, for W4.7's conversion tracking; new this pass,
+  not yet written by anything since Deep Dive Research itself isn't built in this repo).
+- Assumed REST: `/rest/opportunities`, `/rest/opportunities/{id}`.
+- **`Expansion` is not a new-logo stage** — an Opportunity reaching `Expansion` didn't travel
+  DemoQueue→...→Won first; it's created directly (or reused) specifically to represent an existing
+  client's upsell/amendment deal, per `05 §13`'s explicit "distinct from new-logo pipeline stages"
+  language. Reporting that groups by stage should treat it as its own bucket, not lump it in with
+  the Won funnel.
+
 ### Location
 Single physical site, GBP-driven. Demos and Front Door Audits are inherently per-site, so they
 attach here — not on the Opportunity that may span several Locations, and not on the Company that
@@ -158,13 +184,12 @@ may hold Locations under completely different Contracts.
 - Assumed REST: `GET/POST/PATCH /rest/locations`, `/rest/locations/{id}`.
 - **Location Contract Lock**: `contractStatus` is the field every lock check reads. A NEW
   Contract-generation attempt on a Location that's already `ActiveM2M`/`ActiveTerm` from an
-  *unrelated* Opportunity blocks and routes to human review. A change from the *same* Company
-  already holding that Contract is a Contract Amendment (supersede, not block) — see Contract below.
-  Both concepts are named in `06`/`05 §13`; only the *field* they key off is built this pass — the
-  actual lock-enforcement workflow (blocking a new Opportunity) and the Amendment workflow
-  (superseding an existing Contract) are Step 2/3 work, not built yet. This pass makes sure
-  `contractStatus` gets set correctly by the Won-conversion workflow (W1.6) so those can be built
-  against real data later, not guessed at.
+  *unrelated* Company blocks and routes to human review — enforced by
+  `location-contract-lock-check.workflow.json`. A change from the *same* Company already holding
+  that Contract is a Contract Amendment (supersede, not block) — see Contract below and
+  `contract-amendment-flow.workflow.json`. Both workflows built this pass, using the exact
+  distinguishing rule `05 §13` states: same Company incoming = Amendment territory, different
+  Company = Lock block.
 
 ### Company
 The commercial entity. Contracts attach here. Every post-sale automation (health/usage scoring,
@@ -188,9 +213,9 @@ Company-level. Mirrors the winning Opportunity's Location set at the moment of W
   `totalValue`, `agreementValue`, `tier`, `startedAt`, `stripeSubscriptionOrPaymentId`,
   `supersededByContractId` (nullable — set on the OLD contract when an Amendment creates a new one).
 - Assumed REST: `/rest/contracts`, `/rest/contracts/{id}`.
-- Created by W1.6 (Stripe payment success) this pass — see `workflows/phase-1-mvp/README.md`. The
-  full Contract Amendment Flow (supersede + Accounting Audit Event + Deal stage → "Expansion") is
-  **not built this pass** — Step 2/3 work per the agreed sequencing, not blocking the migration.
+- Created by W1.6 (Stripe payment success, new-logo path only). The full Contract Amendment Flow
+  (supersede + AccountingAuditEvent + Deal stage → "Expansion") is now built —
+  `contract-amendment-flow.workflow.json`, for the SAME-Company path W1.6 explicitly doesn't handle.
 
 ### BillingPeriod (Billing/Accounting Period)
 New in v4 (`05 §15`). One record per Contract per monthly billing cycle — auto-generated for both
@@ -200,10 +225,23 @@ M2M and Term contracts, since commission/COGS get calculated monthly regardless 
   `cogsBreakdown` (voice minutes / STT / TTS / API costs), `commissionOwedCents`, `commissionStatus`
   (`accrued` / `approved` / `paid` / `clawback`), `repId`.
 - Assumed REST: `/rest/billingPeriods`, `/rest/billingPeriods/{id}`.
-- W1.6 creates the *first* period on Won this pass. The recurring monthly generation (and the
-  "Contract Amendment closes the current period, starts a new one" rule) is Step 2/3 work — this
-  pass only makes sure period #1 exists so nothing downstream has to special-case "no billing period
-  yet" the moment a client goes live.
+- W1.6 creates the *first* period on Won. `contract-amendment-flow.workflow.json` now handles "close
+  the current period, start a new one" on an Amendment. The *steady-state* recurring monthly
+  generation — every Contract not being amended still needs its next period auto-created when the
+  current one ends — is `billing-period-rollover.workflow.json` (new, schedule-triggered).
+
+### AccountingAuditEvent (new this pass)
+`05 §13`: "Accounting Audit Event auto-logs: old Contract ID → new Contract ID, what changed,
+before/after values, timestamp." Distinct from the generic Activity Event timeline (Tag-for-Action,
+AI Activity Summary) — this is specifically the financial/contract-change record the `#accounting`
+channel (`05 §14`) surfaces.
+
+- Fields: `id`, `companyId`, `oldContractId`, `newContractId`, `beforeTotalValueCents`,
+  `afterTotalValueCents`, `beforeLocationIds` (array), `afterLocationIds` (array), `occurredAt`.
+- Assumed REST: `/rest/accountingAuditEvents`, `/rest/accountingAuditEvents/{id}`.
+- Written only by `contract-amendment-flow.workflow.json`, one row per Amendment — never edited or
+  deleted, per the same "audit trail requires the history" principle as Contract's own `Superseded`
+  status.
 
 ### Rep (Twenty CRM's native user / Workspace Member — extended, not a new object)
 Twenty CRM already has real user accounts for logged-in team members — this isn't a new custom

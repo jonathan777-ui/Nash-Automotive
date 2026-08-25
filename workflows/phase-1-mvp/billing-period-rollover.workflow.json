@@ -1,0 +1,154 @@
+{
+  "name": "Orbit AI - CRM Architecture - Billing Period rollover (05 Section 15, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "543c1bb0-6d19-4d9b-889e-13d2c66e8bc3",
+      "name": "Every day at 4am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 4 * * *"
+            }
+          ]
+        }
+      },
+      "notes": "05 Section 15: BillingPeriod is 'auto-generated monthly for both M2M and Term contracts.' W1.6 creates period #1 on Won; contract-amendment-flow.workflow.json closes/reopens a period on an Amendment. This workflow is the third leg - the STEADY-STATE case, where a Contract just keeps running unchanged and its current period simply ends. Runs after nightly-backup.workflow.json's 3am slot, same 'confirm the instance's configured timezone' caveat that workflow already flags."
+    },
+    {
+      "id": "d6964f6c-012c-471c-8b75-eb08536112ec",
+      "name": "Fetch active Contracts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-960, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts?filter=status[eq]:Active",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "A Superseded Contract is skipped by construction (this filter) - its final period was already closed by contract-amendment-flow.workflow.json when it got superseded, so it has nothing left to roll over."
+    },
+    {
+      "id": "31372f41-e7ab-49d5-851c-660f72423948",
+      "name": "Split Contracts",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-720, 0],
+      "parameters": {
+        "fieldToSplitOut": "id"
+      },
+      "notes": "Splits the Contracts list response into one item per Contract ID for the per-Contract Billing Period check below. ASSUMES the list response is a plain array with a top-level 'id' field per row - same REST-shape uncertainty as every workflow here; adjust the split field once the real response shape is confirmed."
+    },
+    {
+      "id": "bf836cda-a4c6-4511-b5c6-366315d19320",
+      "name": "Fetch Contract's Billing Periods",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods?filter=contractId[eq]:{{ $json.id }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Same per-Contract fetch-then-decide shape as contract-amendment-flow.workflow.json's own Billing Period handling - deliberately not deduplicated into a shared sub-workflow this pass, since the two callers want different things (amendment always closes+reopens; this one only reopens when the current period has actually ended)."
+    },
+    {
+      "id": "fab8a83e-2803-4aee-b71f-a789dce43c11",
+      "name": "Compute rollover decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.billingPeriods)) return json.data.billingPeriods;\n  if (json && Array.isArray(json.billingPeriods)) return json.billingPeriods;\n  return [];\n}\n\nconst contractId = $('Split Contracts').item.json.id;\nconst periods = $input.all().flatMap(asArray).sort((a, b) => new Date(b.periodStart) - new Date(a.periodStart));\nconst current = periods[0];\nconst now = new Date();\n\n// No period at all shouldn't happen (W1.6 always creates #1) but is handled rather than crashing -\n// same 'known limitation, not silently assumed correct' discipline as the amendment workflow's own\n// 'Pick current period' node.\nif (!current) {\n  return [{ json: { contractId, needsRollover: false, reason: 'No BillingPeriod found for this Contract at all - unexpected, flagging rather than guessing a start date.' } }];\n}\n\nconst needsRollover = new Date(current.periodEnd) <= now;\nreturn [{\n  json: {\n    contractId,\n    needsRollover,\n    nextPeriodStart: current.periodEnd,\n    reason: needsRollover\n      ? `Current period ended ${current.periodEnd} - rolling over.`\n      : `Current period runs through ${current.periodEnd} - not due yet.`,\n  },\n}];"
+      }
+    },
+    {
+      "id": "72197c64-cc74-4cb8-a3b3-fd0ac8163c03",
+      "name": "Needs rollover?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [0, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.needsRollover }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1f3ee371-8b95-4687-b52a-ca27523c7b1f",
+      "name": "Create next Billing Period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contractId: $json.contractId, periodStart: $json.nextPeriodStart, periodEnd: new Date(new Date($json.nextPeriodStart).getTime() + 30*24*60*60*1000).toISOString(), revenueCents: 0, commissionStatus: 'accrued' }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "periodStart picks up exactly where the previous period's periodEnd left off (no gap, no overlap) rather than 'now' - if this job is ever late (instance down overnight, say), the new period still starts on schedule instead of drifting. revenueCents starts at 0, same flagged simplification as W1.6/the amendment workflow: real revenue linkage needs a recurring-charge Stripe webhook this repo doesn't wire up yet (only the initial Checkout Session is handled). periodEnd is a naive +30 days, not calendar-month-aware, matching the existing simplification already flagged in W1.6 rather than introducing a second, inconsistent date convention."
+    }
+  ],
+  "connections": {
+    "Every day at 4am": {
+      "main": [[{ "node": "Fetch active Contracts", "type": "main", "index": 0 }]]
+    },
+    "Fetch active Contracts": {
+      "main": [[{ "node": "Split Contracts", "type": "main", "index": 0 }]]
+    },
+    "Split Contracts": {
+      "main": [[{ "node": "Fetch Contract's Billing Periods", "type": "main", "index": 0 }]]
+    },
+    "Fetch Contract's Billing Periods": {
+      "main": [[{ "node": "Compute rollover decision", "type": "main", "index": 0 }]]
+    },
+    "Compute rollover decision": {
+      "main": [[{ "node": "Needs rollover?", "type": "main", "index": 0 }]]
+    },
+    "Needs rollover?": {
+      "main": [
+        [{ "node": "Create next Billing Period", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,335 @@
+{
+  "name": "Orbit AI - CRM Architecture - Contract Amendment Flow (05 Section 7/13, new - not brief-W-numbered)",
+  "nodes": [
+    {
+      "id": "994a8702-fc76-46a6-97cb-c58a6807c347",
+      "name": "Contract amendment webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1600, 0],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contract-amendment",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "05 Section 7/13: 'any material change to an existing Contract (Location added/removed, service tier changed) triggers versioning + an Accounting Audit Event, NOT an edit in place' - specifically for a change originating from the SAME Company already holding the Contract (an unrelated Company hitting an active Location is location-contract-lock-check.workflow.json's job instead, not this one). Input contract: {companyId, oldContractId, opportunityId (the expansion deal driving this - required, since 'Deal stage on the affected record moves to Expansion' needs a record), newLocationIds: string[] (the FULL updated set, not a delta), newServiceTier?: string, newTotalValueCents, newAgreementValueCents}. Meant to be called by a rep action (Deals Desk, not built) or a future upsell-acceptance webhook once one exists - nothing in this repo yet generates this call automatically."
+    },
+    {
+      "id": "7d23a3cb-faf2-42fb-a092-845ff27439c7",
+      "name": "Fetch old Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1360, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts/{{ $json.body.oldContractId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Captures the BEFORE state (tier, totalValue, locationIds) for the AccountingAuditEvent below - the whole point of an audit event is a real before/after, not just an after."
+    },
+    {
+      "id": "a2c7895f-3298-4210-b31b-9723c1017028",
+      "name": "Create new Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1120, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companyId: $('Contract amendment webhook').item.json.body.companyId, locationIds: $('Contract amendment webhook').item.json.body.newLocationIds, status: 'Active', totalValue: $('Contract amendment webhook').item.json.body.newTotalValueCents, agreementValue: $('Contract amendment webhook').item.json.body.newAgreementValueCents, tier: $('Contract amendment webhook').item.json.body.newServiceTier || ($json.data || $json).tier, startedAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "A NEW Contract row, not a PATCH to the old one - 'triggers versioning, NOT an edit in place' is the spec's own explicit wording. Falls back to the old Contract's own tier when the caller didn't name a new one (a pure Location-count change with no tier change)."
+    },
+    {
+      "id": "45e6d292-370e-416b-8d2b-5eabd4cb7e74",
+      "name": "Supersede old Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-880, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/contracts/{{ $('Contract amendment webhook').item.json.body.oldContractId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'Superseded', supersededByContractId: $json.id }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "'Old Contract -> status changes to Superseded (never deleted - audit trail requires the history)' - per spec, verbatim. supersededByContractId is the field CRM-OBJECT-MODEL.md's Contract object already reserved for exactly this, unused until now."
+    },
+    {
+      "id": "13e7aefa-1454-4a36-8bf1-f26d063f7307",
+      "name": "Create AccountingAuditEvent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-640, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/accountingAuditEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companyId: $('Contract amendment webhook').item.json.body.companyId, oldContractId: $('Contract amendment webhook').item.json.body.oldContractId, newContractId: $('Create new Contract').item.json.id, beforeTotalValueCents: ($('Fetch old Contract').item.json.data || $('Fetch old Contract').item.json).totalValue, afterTotalValueCents: $('Contract amendment webhook').item.json.body.newTotalValueCents, beforeLocationIds: ($('Fetch old Contract').item.json.data || $('Fetch old Contract').item.json).locationIds, afterLocationIds: $('Contract amendment webhook').item.json.body.newLocationIds, occurredAt: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "New object this pass, CRM-OBJECT-MODEL.md's AccountingAuditEvent - 'auto-logs: old Contract ID -> new Contract ID, what changed, before/after values, timestamp,' per spec verbatim. Distinct from the generic Activity Event timeline (which logs Tag-for-Action and AI Activity Summary entries) - this is specifically the financial/contract change record #accounting (Section 14's new channel) surfaces."
+    },
+    {
+      "id": "c66a604a-5fa5-4a77-aa9a-288cdf9d3869",
+      "name": "Advance Opportunity to Expansion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 0],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/opportunities/{{ $('Contract amendment webhook').item.json.body.opportunityId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: 'Expansion', contractId: $('Create new Contract').item.json.id }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "'Deal stage on the affected record moves to Expansion - distinct from new-logo pipeline stages (Demo Queue etc. don't apply to an existing client expanding)' - per spec verbatim. This is why opportunityId is a required input: Expansion is a stage on a real Opportunity representing the upsell deal, not an automatic side effect with no deal record to advance."
+    },
+    {
+      "id": "1ce42ff9-6e4f-4b3e-a4b8-b3f2c1a8f631",
+      "name": "Split newLocationIds",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-160, -160],
+      "parameters": {
+        "fieldToSplitOut": "body.newLocationIds"
+      },
+      "notes": "Fire-and-forget branch relative to the response - same reasoning as stripe-payment-to-crm.workflow.json's own Location-status-update branch. Reads directly off the webhook's own output (this branch never needed an intermediate node's $json), same as that workflow's pattern."
+    },
+    {
+      "id": "686bf91f-c505-475e-8eb8-cb2140e1ac9a",
+      "name": "Update Location contractStatus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, -160],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/locations/{{ $json.body.newLocationIds }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contractStatus: 'ActiveM2M', companyId: $('Contract amendment webhook').item.json.body.companyId }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Covers a newly-ADDED Location on the amended Contract (one that wasn't on the old Contract's set) - needs its contractStatus/companyId set for the first time, same as W1.6's own Won-conversion write. A Location that was already on the old Contract and stays on the new one gets the same PATCH again here, which is a harmless no-op re-write, not a bug - simpler than diffing old vs. new sets to skip unchanged ones. Same ActiveM2M-assumed simplification flagged in W1.6."
+    },
+    {
+      "id": "3e9ab4af-8ca0-48df-a868-20bcb594ed34",
+      "name": "Fetch old Contract's Billing Periods",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods?filter=contractId[eq]:{{ $json.body.oldContractId }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "05 Section 15: 'Contract Amendments close out the current period and start a new one at the updated value - no need to rewrite historical periods.' There's no explicit 'is this the open one' flag on BillingPeriod (CRM-OBJECT-MODEL.md's fields: periodStart/periodEnd/revenueCents/cogsBreakdown/commissionOwedCents/commissionStatus/repId, none named 'closed') - the next Code node picks the most-recently-started period as 'current' rather than trusting a status field that doesn't exist."
+    },
+    {
+      "id": "08565c92-a507-4896-b87d-fa144228a008",
+      "name": "Pick current period",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [80, 0],
+      "parameters": {
+        "jsCode": "function asArray(item) {\n  const json = item.json;\n  if (Array.isArray(json)) return json;\n  if (json && json.data && Array.isArray(json.data.billingPeriods)) return json.data.billingPeriods;\n  if (json && Array.isArray(json.billingPeriods)) return json.billingPeriods;\n  return [];\n}\n\nconst periods = $input.all().flatMap(asArray)\n  .sort((a, b) => new Date(b.periodStart) - new Date(a.periodStart));\n\nreturn [{ json: { currentPeriodId: periods[0]?.id || null } }];"
+      },
+      "notes": "KNOWN LIMITATION, flagged rather than silently assumed correct: picking the latest-started period as 'current' is a heuristic, not a guarantee - if periods are ever created out of order, or a Contract somehow has zero periods (shouldn't happen once W1.6 always creates period #1, but not enforced), this could pick the wrong one or find none. currentPeriodId: null is handled explicitly downstream (the close-period PATCH is skipped, not sent with a broken URL)."
+    },
+    {
+      "id": "f33f0636-c75c-40dc-b351-e06f2a2e145d",
+      "name": "Has a current period?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [320, 0],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.currentPeriodId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "99cdaadf-83a2-47d2-91a0-3cadb32a638a",
+      "name": "Close current period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, -80],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods/{{ $json.currentPeriodId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ periodEnd: new Date().toISOString() }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "Truncates the old Contract's open period early (periodEnd = now, whatever it was previously) rather than deleting it - the period still holds whatever revenue/COGS/commission accrued on the old terms up to this moment, which is exactly the historical record Section 15 says not to rewrite."
+    },
+    {
+      "id": "eb8f2e99-d45b-4919-a0bd-0303da66ada2",
+      "name": "Create new period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 80],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_CRM_BASE_URL }}/rest/billingPeriods",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contractId: $('Create new Contract').item.json.id, periodStart: new Date().toISOString(), periodEnd: new Date(Date.now() + 30*24*60*60*1000).toISOString(), revenueCents: 0, commissionStatus: 'accrued' }) }}",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpBearerAuth": {
+          "name": "Twenty CRM API"
+        }
+      },
+      "notes": "'Start a new one at the updated value' - revenueCents starts at 0 rather than the new agreementValue, since revenue is Stripe-linked (an actual payment event), and an Amendment doesn't necessarily involve an immediate new Stripe charge (could be a mid-cycle upsell billed on the next cycle). Runs unconditionally, not gated behind 'Has a current period?', since a new Contract needs its first period regardless of whether the old one was found/closeable - matches W1.6's own 'always create period #1' rule."
+    },
+    {
+      "id": "f7d6bc9c-280e-4bef-b2cf-d5b8d9007fe5",
+      "name": "Alert: Contract Amendment logged",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-400, 160],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_INSTANCE_URL }}/webhook/alert-dispatch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ severity: 'info', source: 'contract-amendment-flow', message: 'Contract Amendment logged for Company ' + $('Contract amendment webhook').item.json.body.companyId + ' - Contract ' + $('Contract amendment webhook').item.json.body.oldContractId + ' superseded by ' + $('Create new Contract').item.json.id + '.', linkUrl: ($env.TWENTY_CRM_BASE_URL || '') + '/objects/company/' + $('Contract amendment webhook').item.json.body.companyId }) }}",
+        "options": {}
+      },
+      "notes": "'Contract Amendment logged (new)' is explicitly named in 05 Section 11's alert-trigger list, and Section 14 names #accounting as the channel it belongs in - not an invented alert."
+    },
+    {
+      "id": "acecfb9a-655d-4bf3-90cd-3b97b7bfefef",
+      "name": "Respond: amended",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-160, 160],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, newContractId: $('Create new Contract').item.json.id, oldContractId: $('Contract amendment webhook').item.json.body.oldContractId }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Contract amendment webhook": {
+      "main": [[{ "node": "Fetch old Contract", "type": "main", "index": 0 }]]
+    },
+    "Fetch old Contract": {
+      "main": [[{ "node": "Create new Contract", "type": "main", "index": 0 }]]
+    },
+    "Create new Contract": {
+      "main": [[{ "node": "Supersede old Contract", "type": "main", "index": 0 }]]
+    },
+    "Supersede old Contract": {
+      "main": [[{ "node": "Create AccountingAuditEvent", "type": "main", "index": 0 }]]
+    },
+    "Create AccountingAuditEvent": {
+      "main": [[{ "node": "Advance Opportunity to Expansion", "type": "main", "index": 0 }]]
+    },
+    "Advance Opportunity to Expansion": {
+      "main": [
+        [
+          { "node": "Split newLocationIds", "type": "main", "index": 0 },
+          { "node": "Fetch old Contract's Billing Periods", "type": "main", "index": 0 },
+          { "node": "Alert: Contract Amendment logged", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Split newLocationIds": {
+      "main": [[{ "node": "Update Location contractStatus", "type": "main", "index": 0 }]]
+    },
+    "Fetch old Contract's Billing Periods": {
+      "main": [[{ "node": "Pick current period", "type": "main", "index": 0 }]]
+    },
+    "Pick current period": {
+      "main": [[{ "node": "Has a current period?", "type": "main", "index": 0 }]]
+    },
+    "Has a current period?": {
+      "main": [
+        [{ "node": "Close current period", "type": "main", "index": 0 }],
+        [{ "node": "Create new period", "type": "main", "index": 0 }]
+      ]
+    },
+    "Close current period": {
+      "main": [[{ "node": "Create new period", "type": "main", "index": 0 }]]
+    },
+    "Alert: Contract Amendment logged": {
+      "main": [[{ "node": "Respond: amended", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "PLACEHOLDER_ALERT_WORKFLOW_ID"
+  }
+}

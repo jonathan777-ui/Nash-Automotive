@@ -365,7 +365,7 @@ export interface AlertIngestBody {
   linkUrl?: string;
 }
 
-/** Not gated by Cloudflare Access - n8n's alert-dispatcher workflow calls this machine-to-machine,
+/** Not gated by the login page - n8n's alert-dispatcher workflow calls this machine-to-machine,
  * and can't complete an interactive Access login. Gated by a separate shared secret instead (see
  * index.ts's routing, which checks this BEFORE the Access verification that applies to every
  * human-facing route). */
@@ -451,7 +451,7 @@ export interface NotificationIngestBody {
   linkUrl?: string;
 }
 
-/** Not gated by Cloudflare Access, same reasoning as handleAlertsIngest - tag-for-action.workflow.json
+/** Not gated by the login page, same reasoning as handleAlertsIngest - tag-for-action.workflow.json
  * calls this machine-to-machine and can't complete an interactive Access login. Reuses
  * ALERTS_INGEST_SECRET rather than adding a second Wrangler secret - same trust boundary (any n8n
  * workflow authenticated to write into this Worker), no reason to fragment it. */

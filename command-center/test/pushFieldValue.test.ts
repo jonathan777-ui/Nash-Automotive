@@ -3,8 +3,8 @@ import { pushFieldValue, type Env } from '../src/index.js';
 import type { CredentialField } from '../src/vendors.js';
 
 const baseEnv: Env = {
-  TEAM_DOMAIN: 'team.cloudflareaccess.com',
-  POLICY_AUD: 'aud',
+  ACCESS_PASSWORD: 'team-password',
+  SESSION_SECRET: 'session-secret',
   STATUS: {} as KVNamespace,
   MESSAGING_DB: {} as D1Database,
   ALERTS_INGEST_SECRET: 'secret',

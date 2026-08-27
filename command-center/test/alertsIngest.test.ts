@@ -4,8 +4,8 @@ import { FakeD1 } from './messaging/fakeD1.js';
 
 function baseEnv(overrides: Partial<Env> = {}): Env {
   return {
-    TEAM_DOMAIN: 'x',
-    POLICY_AUD: 'x',
+    ACCESS_PASSWORD: 'x',
+    SESSION_SECRET: 'x',
     STATUS: {} as KVNamespace,
     MESSAGING_DB: new FakeD1() as unknown as D1Database,
     ALERTS_INGEST_SECRET: 'real-secret',

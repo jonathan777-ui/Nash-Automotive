@@ -8,7 +8,7 @@ from your machine, using the CLI-auth pattern the brief asked for (one browser c
 keys), all in the one session you said you'd do this in.
 
 **Do checkpoint 1 (steps 1-5) fully before checkpoint 2 (steps 6+)** — the form in checkpoint 2
-sits behind the same Access gate, so there's nothing to test it against until Access is live.
+sits behind the same login gate, so there's nothing to test it against until that's live.
 
 ## 1. Install and authenticate
 
@@ -25,72 +25,52 @@ npx wrangler deploy
 ```
 
 This publishes the Worker to a `*.workers.dev` URL (printed in the output) and prints the
-Worker's ID — save both. Because `TEAM_DOMAIN`/`POLICY_AUD` in `wrangler.toml` are still
-placeholders, the Worker will refuse every request with a 500 explaining why (see
-`src/index.ts` — it fails closed on purpose). **Do not skip straight to relaxing that check** —
-the next steps make it real instead.
+Worker's ID — save both. Because `ACCESS_PASSWORD`/`SESSION_SECRET` aren't set yet, the Worker
+will refuse every request with a 500 explaining why (see `src/index.ts`'s `verifySession` — it
+fails closed on purpose). **Do not skip straight to relaxing that check** — the next steps make
+it real instead.
 
-## 3. Enable Cloudflare Access on this Worker
+## 3. Set up the login gate (shared team password, not Cloudflare Access)
 
-If your account doesn't have Zero Trust enabled yet (one-time, only needed once ever):
-dash.cloudflare.com → **Zero Trust** → follow the setup prompt → pick a team name (this becomes
-your `TEAM_DOMAIN`, e.g. team name `orbitai` → `orbitai.cloudflareaccess.com`).
+**Cloudflare Access was the original design here, but its Zero Trust setup prompted for card
+details on this account** — rather than block on that, the login gate is a shared team password
+instead. Simpler (no Zero Trust setup, no card requirement), at the cost of real per-user auth:
+whoever knows the password can sign in as any email they type (the email is just an honor-system
+identity used for message/comment/notification attribution, not independently verified). Good
+enough for a small internal team; revisit if that tradeoff stops being acceptable — the code this
+replaced (`verifyAccess`, Cloudflare Access JWT validation) is still in git history if you want to
+switch back later.
 
-Then, easiest path — dashboard:
-
-1. **Workers & Pages** → `orbit-command-center` → **Settings** → **Domains & Routes**
-2. Next to the `workers.dev` route, click **Enable Cloudflare Access**
-3. Click **Manage Cloudflare Access** and set the policy: **Include** → **Emails ending in** →
-   `orbitaiautomation.com` (matches what you asked for — anyone on the Workspace domain, not just
-   your own address)
-4. Save. On the Access application's **Overview** page, copy the **Application Audience (AUD)
-   Tag**.
-
-Equivalent via API, if you'd rather script it (needs an API token with **Zero Trust Access
-Edit** permission, created at your Cloudflare profile → API Tokens):
+Set both as plain Wrangler secrets (never in `wrangler.toml`, same treatment as `CF_API_TOKEN`):
 
 ```
-curl "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/access/apps" \
-  --request POST \
-  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-  --json '{
-    "type": "self_hosted",
-    "name": "Orbit Command Center",
-    "destinations": [{ "type": "worker", "worker_id": "<the Worker ID from step 2>" }],
-    "policies": [{
-      "decision": "allow",
-      "include": [{ "email_domain": { "domain": "orbitaiautomation.com" } }]
-    }]
-  }'
+cd command-center
+npx wrangler secret put ACCESS_PASSWORD      # the one password your whole team signs in with
+npx wrangler secret put SESSION_SECRET       # a random value, e.g. `openssl rand -hex 32`
 ```
 
-The response's `aud` field is the same Audience Tag from the dashboard path.
+`SESSION_SECRET` signs the session cookie issued at login (HS256, via `jose` — already a
+dependency). Rotating it logs everyone out at once; there's no separate revocation mechanism
+beyond that.
 
-## 4. Wire the real values in and redeploy
-
-Edit `wrangler.toml`:
-
-```toml
-[vars]
-TEAM_DOMAIN = "orbitai.cloudflareaccess.com"   # your actual Zero Trust team domain
-POLICY_AUD = "<the Audience Tag from step 3>"
-```
+## 4. Redeploy
 
 ```
 npx wrangler deploy
 ```
 
+No `wrangler.toml` edit needed for this step — both values above are secrets, not vars.
+
 ## 5. Verify (this is the actual checkpoint — code alone doesn't count)
 
-- Visit the Worker's URL in an incognito window. You should land on a Cloudflare Access login
-  page (email + one-time PIN — no separate identity-provider setup needed for this to work),
-  **before** ever reaching the Worker.
-- Sign in with an `@orbitaiautomation.com` address → you should land on the "You're in" page
-  showing your verified email.
-- Try an address on a different domain if you have one handy → Access should refuse it before
-  the Worker ever sees the request.
-- Try hitting the Worker's URL with `curl` (no Access session) → expect a 403 from Access itself,
-  not a 500 from the Worker.
+- Visit the Worker's URL in an incognito window. You should land on `/login` — a simple email +
+  password form — **before** ever reaching the Worker's real pages.
+- Enter any email and the real `ACCESS_PASSWORD` → you should land on the main Command Center
+  page, "Signed in as <the email you typed>."
+- Try the wrong password → should redisplay the login page with "Incorrect password," not a 500.
+- Try hitting the Worker's URL directly with `curl` (no session cookie) → expect a redirect to
+  `/login`, not the real page content.
+- Tap **Logout** on the main page → should clear your session and send you back to `/login`.
 
 ## 6. Create the Secrets Store (if it doesn't already exist)
 
@@ -141,7 +121,7 @@ npx wrangler deploy
 
 ## 9. Verify checkpoint 2 — this is where the unverified API guess gets tested
 
-Visit the Worker's URL (through Access, as an `@orbitaiautomation.com` user) and submit a test
+Visit the Worker's URL (signed in through /login) and submit a test
 value for **Plunk** or **Stripe** — a throwaway string is fine, this is just proving the write
 path, not onboarding a real key yet.
 
@@ -198,7 +178,7 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
 "Command Center Alerts Ingest" credential).
 
 **Verify:**
-1. Visit `/messaging` through Access — create a channel, post a message with an `@mention`, confirm
+1. Visit `/messaging` — create a channel, post a message with an `@mention`, confirm
    it renders (the mention highlighted, the message showing up without a manual page refresh within
    ~5 seconds).
 2. Visit `/messaging/thread?subjectType=opportunity&subjectId=test-123` — post a comment, confirm
@@ -210,7 +190,7 @@ to `POST /api/alerts` with, so the same value needs to go into n8n as well (that
    should `200`, and the alert should show up in `/messaging`'s sidebar with an "Open record →" link.
 4. **New this pass (Step 3 — alert-surface priority fix):** click "Acknowledge" on that alert row —
    it should redirect back to `/messaging` and the row should now read "✓ Acknowledged by
-   <your Access email>" instead of showing the button. Click it again (or have a second person try)
+   <the email you signed in with>" instead of showing the button. Click it again (or have a second person try)
    and confirm it stays attributed to the first acknowledger, not reassigned.
 5. **New this pass (Step 4 — the real 11-channel taxonomy):** the channel list on the left should
    show all 11 real channels (`new-leads`, `demos`, `dialer`, `nurture`, `portal-conversion`,

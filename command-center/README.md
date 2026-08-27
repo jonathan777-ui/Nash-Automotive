@@ -24,9 +24,14 @@ full deploy + verify sequence, in order (Access gate first, form behind it, then
 
 ### Checkpoint 1 — auth gate
 
-`src/index.ts` requires and independently re-verifies a `Cf-Access-Jwt-Assertion` (issuer +
-audience, via `jose` against the Access team's JWKS endpoint) rather than trusting the header's
-mere presence, and fails closed with a 500 if `TEAM_DOMAIN`/`POLICY_AUD` are still placeholders.
+**Originally Cloudflare Access; switched to a shared team password mid-deploy** when Access's
+Zero Trust setup prompted for card details on the real account. `src/index.ts`'s `/login` route
+checks one shared `ACCESS_PASSWORD` (a plain Wrangler secret) and issues a signed session cookie
+(`jose`, HS256, keyed by `SESSION_SECRET`) — the email a user types at login is honor-system, not
+independently verified, since there's no per-user identity provider anymore. Fails closed with a
+500 if `ACCESS_PASSWORD`/`SESSION_SECRET` aren't set yet. Real Cloudflare Access (per-user SSO) is
+still the better long-term answer if the shared-password tradeoff stops being acceptable — see
+`DEPLOY.md` step 3 for the reasoning and how to switch back.
 
 ### Checkpoint 2 — test credential form + Secrets Store write
 
@@ -204,9 +209,9 @@ that channel's alerts above the chat thread — previously every alert only ever
   thread page keyed by `?subjectType=&subjectId=`, and a recent-alerts panel).
 - New routes wired into `src/index.ts`: `GET/POST /messaging`, `GET/POST /messaging/thread`,
   `POST /messaging/alerts/acknowledge` (new this pass — see Step 3 below), and `POST /api/alerts`.
-  That last one is deliberately **not** behind Cloudflare Access — n8n's alert-dispatcher workflow
-  calls it machine-to-machine and can't complete an interactive Access login, so it's checked
-  *before* the Access gate and authenticated with its own shared secret (`ALERTS_INGEST_SECRET`, a
+  That last one is deliberately **not** behind the login gate — n8n's alert-dispatcher workflow
+  calls it machine-to-machine and can't complete an interactive login, so it's checked
+  *before* the login gate and authenticated with its own shared secret (`ALERTS_INGEST_SECRET`, a
   plain Wrangler secret like `CF_API_TOKEN` — never in Secrets Store or `wrangler.toml`, since
   that's the credential this Worker uses to *receive* pushes, not one a human submits through the
   form). Until that secret is set for real, `/api/alerts` returns 401 on every request rather than
@@ -253,7 +258,7 @@ Two new pages, `/dialer` and `/deals-desk`, closing what was by far the largest 
 throughout this whole build: every backend piece the dialer hopper (Phase 3) and Contract Amendment
 Flow needed was real and callable, but nothing in this repo actually called them in sequence for a
 live rep. Same architecture as everything else here — server-rendered HTML, no client-side
-framework, Cloudflare Access-gated — and the same "Command Center never talks to Twenty CRM
+framework, behind the same login gate — and the same "Command Center never talks to Twenty CRM
 directly" rule Tag-for-Action already follows: both pages call out to two small new n8n workflows
 (`rep-lookup.workflow.json`, `deals-desk-lookup.workflow.json`, `workflows/phase-3-dialer-hopper/`
 and `phase-1-mvp/`) rather than reading Twenty CRM themselves.

@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { SignJWT, jwtVerify } from 'jose';
 import { createSecret, type SecretsStoreEnv } from './secretsStore.js';
 import { bindWorkerSecret } from './cfWorkerSecrets.js';
 import { upsertN8nCredential } from './pushTargets/n8nCredentials.js';
@@ -25,8 +25,16 @@ import { handleDialerPage, handleGetNextCall, handlePlaceCall, handleWrapUpCall 
 import { handleAmendContract, handleDealsDeskPage } from './dealsDesk/routes.js';
 
 export interface Env extends SecretsStoreEnv {
-  TEAM_DOMAIN: string;
-  POLICY_AUD: string;
+  /** A plain Wrangler secret (`wrangler secret put ACCESS_PASSWORD`) — one shared password for the
+   * whole team, checked at POST /login. Simpler than Cloudflare Access (no Zero Trust setup, no
+   * card-on-file requirement), at the cost of real per-user auth: anyone who knows the password can
+   * sign in as any email they type. Good enough for a small internal team; swap back to Access-style
+   * SSO later if that tradeoff stops being acceptable. */
+  ACCESS_PASSWORD: string;
+  /** A plain Wrangler secret (`wrangler secret put SESSION_SECRET`) — the HMAC key used to sign/verify
+   * the session cookie issued at login. Generate a real random value (e.g. `openssl rand -hex 32`);
+   * rotating it invalidates every existing session. */
+  SESSION_SECRET: string;
   STATUS: KVNamespace;
   /** Real D1 binding — see wrangler.toml. Piece 2's Internal Team Messaging (05 §14). */
   MESSAGING_DB: D1Database;
@@ -57,64 +65,140 @@ export interface Env extends SecretsStoreEnv {
   NETLIFY_SITE_ID?: string;
 }
 
-const PLACEHOLDER_VALUES = new Set([
-  'PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN',
-  'PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD',
-  'PLACEHOLDER_CLOUDFLARE_ACCOUNT_ID',
-  'PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID',
-]);
+const SESSION_COOKIE = 'cc_session';
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
-let cachedJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
-let cachedTeamDomain: string | undefined;
-
-function getJwks(teamDomain: string) {
-  if (cachedJwks && cachedTeamDomain === teamDomain) return cachedJwks;
-  cachedJwks = createRemoteJWKSet(new URL(`https://${teamDomain}/cdn-cgi/access/certs`));
-  cachedTeamDomain = teamDomain;
-  return cachedJwks;
+function parseCookies(header: string | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    if (key) out[key] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
 }
 
-type AccessResult = { ok: true; email: string } | { ok: false; response: Response };
+function sessionCookieHeader(token: string): string {
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`;
+}
 
-async function verifyAccess(request: Request, env: Env): Promise<AccessResult> {
-  if (
-    !env.TEAM_DOMAIN ||
-    !env.POLICY_AUD ||
-    PLACEHOLDER_VALUES.has(env.TEAM_DOMAIN) ||
-    PLACEHOLDER_VALUES.has(env.POLICY_AUD)
-  ) {
+function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+/** Not fully constant-time (the length check short-circuits), but the byte-by-byte compare below it
+ * means a shared team password isn't recoverable via a per-character timing oracle either way - a
+ * reasonable tradeoff for an internal tool, not a defense against a well-resourced attacker. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+type SessionResult = { ok: true; email: string } | { ok: false; response: Response };
+
+/** Replaces Cloudflare Access: one shared team password (ACCESS_PASSWORD) instead of per-user SSO,
+ * so there's no Zero Trust setup and no card-on-file requirement. The email a user types at login
+ * is NOT independently verified (anyone who knows the password can claim any email) - it's honor
+ * system, same trust level as a shared team password already implies. Session identity lives in a
+ * signed (HS256, jose) cookie rather than KV/D1, so login doesn't need its own storage. */
+async function verifySession(request: Request, env: Env): Promise<SessionResult> {
+  if (!env.ACCESS_PASSWORD || !env.SESSION_SECRET) {
     return {
       ok: false,
       response: new Response(
-        'Command Center is not configured yet (TEAM_DOMAIN/POLICY_AUD still placeholders). ' +
-          'See DEPLOY.md — this Worker must never serve requests before the Access application exists.',
+        'Command Center is not configured yet (ACCESS_PASSWORD/SESSION_SECRET not set). ' +
+          'See DEPLOY.md — this Worker must never serve requests before login is configured.',
         { status: 500 },
       ),
     };
   }
 
-  const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!assertion) {
-    return {
-      ok: false,
-      response: new Response(
-        'Forbidden. This Worker must be reached through Cloudflare Access — ' +
-          'if you are seeing this directly, Access is not correctly attached to this Worker. See DEPLOY.md.',
-        { status: 403 },
-      ),
-    };
+  const token = parseCookies(request.headers.get('Cookie'))[SESSION_COOKIE];
+  if (!token) {
+    return { ok: false, response: Response.redirect(new URL('/login', request.url).toString(), 303) };
   }
 
   try {
-    const { payload } = await jwtVerify(assertion, getJwks(env.TEAM_DOMAIN), {
-      issuer: `https://${env.TEAM_DOMAIN}`,
-      audience: env.POLICY_AUD,
-    });
-    const email = typeof payload.email === 'string' ? payload.email : 'unknown';
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(env.SESSION_SECRET));
+    const email = typeof payload.email === 'string' ? payload.email : '';
+    if (!email) throw new Error('missing email claim');
     return { ok: true, email };
   } catch {
-    return { ok: false, response: new Response('Forbidden: invalid or expired Access token.', { status: 403 }) };
+    return { ok: false, response: Response.redirect(new URL('/login', request.url).toString(), 303) };
   }
+}
+
+function renderLoginPage(error: string | null): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in — Orbit Command Center</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0a1628; color: #eaf3fb;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { max-width: 360px; width: 100%; padding: 32px 36px; border: 1px solid #1c2c42;
+          border-radius: 16px; background: #0c1726; box-sizing: border-box; }
+  h1 { font-size: 18px; margin: 0 0 20px; }
+  label { display: block; font-size: 12px; color: #90b3cf; margin: 14px 0 6px; }
+  input { width: 100%; box-sizing: border-box; background: #0a1422; border: 1px solid #1c2c42;
+          border-radius: 8px; padding: 10px; color: #eaf3fb; font-size: 14px; }
+  button { margin-top: 20px; width: 100%; background: linear-gradient(160deg,#1fb6ff,#0a8fd6);
+           color: #04121f; font-weight: 700; border: none; border-radius: 8px; padding: 10px;
+           font-size: 14px; cursor: pointer; }
+  .err { background: rgba(251,113,133,.12); border: 1px solid rgba(251,113,133,.35); color: #fda4af;
+         border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Orbit Command Center</h1>
+    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
+    <form method="post" action="/login">
+      <label>Your email</label>
+      <input type="email" name="email" required>
+      <label>Team password</label>
+      <input type="password" name="password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
+async function handleLoginSubmit(request: Request, env: Env): Promise<Response> {
+  if (!env.ACCESS_PASSWORD || !env.SESSION_SECRET) {
+    return new Response('Command Center is not configured yet (ACCESS_PASSWORD/SESSION_SECRET not set).', { status: 500 });
+  }
+  const form = await request.formData();
+  const email = String(form.get('email') ?? '').trim();
+  const password = String(form.get('password') ?? '');
+
+  if (!email) {
+    return new Response(renderLoginPage('Email is required.'), { status: 400, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  }
+  if (!timingSafeEqual(password, env.ACCESS_PASSWORD)) {
+    return new Response(renderLoginPage('Incorrect password.'), { status: 401, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  }
+
+  const token = await new SignJWT({ email })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('30d')
+    .sign(new TextEncoder().encode(env.SESSION_SECRET));
+
+  return new Response(null, { status: 303, headers: { Location: '/', 'Set-Cookie': sessionCookieHeader(token) } });
+}
+
+function handleLogout(request: Request): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { Location: '/login', 'Set-Cookie': clearSessionCookieHeader() },
+  });
 }
 
 export default {
@@ -137,8 +221,26 @@ export default {
       return withMachineAuth(request, env, () => handleAllocateDemoExtension(env.MESSAGING_DB));
     }
 
-    const access = await verifyAccess(request, env);
-    if (!access.ok) return access.response;
+    // Unauthenticated on purpose - these ARE the login gate now (no Cloudflare Access in front to
+    // intercept first), so they have to be reachable before a session exists.
+    if (request.method === 'GET' && url.pathname === '/login') {
+      if (!env.ACCESS_PASSWORD || !env.SESSION_SECRET) {
+        return new Response(
+          'Command Center is not configured yet (ACCESS_PASSWORD/SESSION_SECRET not set). See DEPLOY.md.',
+          { status: 500 },
+        );
+      }
+      return new Response(renderLoginPage(null), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    if (request.method === 'POST' && url.pathname === '/login') {
+      return handleLoginSubmit(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/logout') {
+      return handleLogout(request);
+    }
+
+    const session = await verifySession(request, env);
+    if (!session.ok) return session.response;
 
     if (request.method === 'POST' && url.pathname === '/secrets') {
       return handleSecretsSubmit(request, env);
@@ -147,37 +249,37 @@ export default {
       return handleStatusSubmit(request, env);
     }
     if (request.method === 'GET' && url.pathname === '/messaging') {
-      return handleMessagingPage(request, env.MESSAGING_DB, access.email);
+      return handleMessagingPage(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/alerts/acknowledge') {
-      return handleAcknowledgeAlert(request, env.MESSAGING_DB, access.email);
+      return handleAcknowledgeAlert(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/tag-for-action') {
-      return handlePostTagForAction(request, env.N8N_INSTANCE_URL, access.email);
+      return handlePostTagForAction(request, env.N8N_INSTANCE_URL, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/notifications/read') {
-      return handleMarkNotificationRead(request, env.MESSAGING_DB, access.email);
+      return handleMarkNotificationRead(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/ai-actions/resolve') {
-      return handleResolveAiAction(request, env.MESSAGING_DB, access.email);
+      return handleResolveAiAction(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/channels') {
       return handleCreateChannel(request, env.MESSAGING_DB);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/messages') {
-      return handlePostMessage(request, env.MESSAGING_DB, access.email);
+      return handlePostMessage(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'GET' && url.pathname === '/messaging/thread') {
       return handleThreadPage(request, env.MESSAGING_DB);
     }
     if (request.method === 'POST' && url.pathname === '/messaging/threads/comments') {
-      return handlePostComment(request, env.MESSAGING_DB, access.email);
+      return handlePostComment(request, env.MESSAGING_DB, session.email);
     }
     if (request.method === 'GET' && url.pathname === '/dialer') {
       return handleDialerPage(request);
     }
     if (request.method === 'POST' && url.pathname === '/dialer/next') {
-      return handleGetNextCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL }, access.email);
+      return handleGetNextCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL }, session.email);
     }
     if (request.method === 'POST' && url.pathname === '/dialer/place-call') {
       return handlePlaceCall(request, { n8nInstanceUrl: env.N8N_INSTANCE_URL });
@@ -193,7 +295,7 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/') {
       const statuses = await getAllStatuses(env.STATUS, VENDORS.map((v) => v.id));
-      return new Response(renderPage(access.email, url.searchParams, statuses), {
+      return new Response(renderPage(session.email, url.searchParams, statuses), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
@@ -448,7 +550,8 @@ function renderPage(email: string, params: URLSearchParams, statuses: Map<string
     <p class="sub">Signed in as ${escapeHtml(email)}. <span class="progress">${connectedCount}/${VENDORS.length} connected.</span>
       &middot; <a href="/messaging" style="color:#7fe0ff">Team messaging (Piece 2)</a>
       &middot; <a href="/dialer" style="color:#7fe0ff">Dialer</a>
-      &middot; <a href="/deals-desk" style="color:#7fe0ff">Deals Desk</a></p>
+      &middot; <a href="/deals-desk" style="color:#7fe0ff">Deals Desk</a>
+      &middot; <form method="post" action="/logout" style="display:inline"><button type="submit" class="secondary" style="padding:2px 8px;font-size:11px;">Logout</button></form></p>
     ${banner}
 
     <h2>CLI-auth — run locally, then confirm here</h2>

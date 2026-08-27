@@ -2,14 +2,12 @@ name = "orbit-command-center"
 main = "src/index.ts"
 compatibility_date = "2026-08-22"
 
-# Both of these are filled in AFTER you create the Cloudflare Access application
-# that gates this Worker — see DEPLOY.md step 3. Neither is a secret; they're
-# public identifiers Access itself uses to validate the JWT it attaches to
-# every request. Deploying with the placeholder values below will make the
-# Worker refuse every request (fails closed, per the placeholder discipline
-# this project uses everywhere else) rather than silently run unauthenticated.
+# The login gate is a shared team password now, not Cloudflare Access (Access needs Zero Trust
+# enabled on the account, which prompted for card details during setup — see ACCESS_PASSWORD/
+# SESSION_SECRET below instead, both plain Wrangler secrets, not vars). This Worker still fails
+# closed exactly the same way if those two secrets are unset - see verifySession in src/index.ts.
 #
-# CF_ACCOUNT_ID / CF_SECRETS_STORE_ID: also not secrets, filled in during checkpoint 2 —
+# CF_ACCOUNT_ID / CF_SECRETS_STORE_ID: not secrets, filled in during checkpoint 2 —
 # see DEPLOY.md. CF_API_TOKEN is NOT here on purpose: it's the credential this Worker uses
 # to write *other* credentials into Secrets Store, so it must be a plain Wrangler secret
 # (`wrangler secret put CF_API_TOKEN`), never sitting in Secrets Store itself or in this
@@ -22,8 +20,6 @@ compatibility_date = "2026-08-22"
 # pass, edit it in the Cloudflare dashboard to add that permission rather than creating a second
 # token - see DEPLOY.md.
 [vars]
-TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
-POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
 CF_ACCOUNT_ID = "739d34937ee1482e939d7c240189fabf"
 CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
 # Not a secret - the n8n instance's own base URL. New this pass (Tag-for-Action, 05 §14 Step 5):
@@ -62,7 +58,14 @@ database_id = "2eb37b46-5f8a-42ba-939a-6ee0542ab536"
 
 # ALERTS_INGEST_SECRET is NOT here on purpose, same reasoning as CF_API_TOKEN above: it's the
 # shared secret n8n's alert-dispatcher workflow uses to authenticate to POST /api/alerts (a
-# machine-to-machine route that can't go through interactive Cloudflare Access), so it must be a
+# machine-to-machine route that can't go through the interactive login page), so it must be a
 # plain Wrangler secret (`wrangler secret put ALERTS_INGEST_SECRET`) — generate a random value,
 # put the same one in n8n's environment as ALERTS_INGEST_SECRET. Until it's set, /api/alerts
 # rejects every request rather than silently accepting unauthenticated writes (see index.ts).
+#
+# ACCESS_PASSWORD / SESSION_SECRET are ALSO not here, same reasoning: run
+#   wrangler secret put ACCESS_PASSWORD     (the one password your whole team signs in with)
+#   wrangler secret put SESSION_SECRET      (a random value, e.g. `openssl rand -hex 32` — signs
+#                                             the session cookie; rotating it logs everyone out)
+# Until both are set, every route redirects to a login page that always rejects (fails closed,
+# same discipline as everywhere else in this file) — see src/index.ts's verifySession.

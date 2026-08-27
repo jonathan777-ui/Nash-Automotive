@@ -42,20 +42,23 @@ N8N_INSTANCE_URL = "PLACEHOLDER_N8N_INSTANCE_URL"
 CF_WORKER_SCRIPT_NAME = "orbit-command-center"
 
 # Tracks per-vendor connection status (both CLI-auth confirmations and manual-paste writes) so
-# the checklist survives across visits. Actually provisioned already (via the Cloudflare MCP
-# tools available in the build session) — this ID is real, not a placeholder.
+# the checklist survives across visits. Real ID, created directly in the account this Worker
+# deploys to (dash.cloudflare.com → Workers & Pages → KV) — the value that was here before this
+# pass belonged to a different Cloudflare account entirely (an earlier build session's own MCP
+# tooling), which is why the first real deploy failed with "KV namespace ... not found."
 [[kv_namespaces]]
 binding = "STATUS"
-id = "c2f4d507f9c64a77b3d7c28b4e4b83c9"
+id = "df97eb00985b42b9b45c7d4224cb10ab"
 
 # Piece 2 — Internal Team Messaging (05 §14): channels/messages/@mentions, comment threads on CRM
-# records, and in-app alert delivery. Also real, not a placeholder — provisioned directly during
-# this build (mcp__Cloudflare_Developer_Platform__d1_database_create), schema applied via
-# d1_database_query. See src/messaging/ and command-center/README.md.
+# records, and in-app alert delivery. Real ID, created directly in the account this Worker deploys
+# to (dash.cloudflare.com → D1 SQL Database) — same "different account" issue as STATUS above.
+# Schema lives at schema.sql in this directory; load it into this database via its Console tab
+# before relying on /messaging or /api/alerts.
 [[d1_databases]]
 binding = "MESSAGING_DB"
 database_name = "orbit-command-center-messaging"
-database_id = "9758e387-cbe4-4120-93ad-f033817e4822"
+database_id = "3034eb2d-6fa3-4316-a42f-255123d5f8a7"
 
 # ALERTS_INGEST_SECRET is NOT here on purpose, same reasoning as CF_API_TOKEN above: it's the
 # shared secret n8n's alert-dispatcher workflow uses to authenticate to POST /api/alerts (a

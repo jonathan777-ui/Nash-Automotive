@@ -24,7 +24,7 @@ compatibility_date = "2026-08-22"
 [vars]
 TEAM_DOMAIN = "PLACEHOLDER_CLOUDFLARE_ACCESS_TEAM_DOMAIN"
 POLICY_AUD = "PLACEHOLDER_CLOUDFLARE_ACCESS_APPLICATION_AUD"
-CF_ACCOUNT_ID = "60e43099b9e309ad3ea771c9d71ec7ab"
+CF_ACCOUNT_ID = "739d34937ee1482e939d7c240189fabf"
 CF_SECRETS_STORE_ID = "PLACEHOLDER_CLOUDFLARE_SECRETS_STORE_ID"
 # Not a secret - the n8n instance's own base URL. New this pass (Tag-for-Action, 05 §14 Step 5):
 # the only place this Worker itself calls OUT to n8n rather than only receiving pushes from it
@@ -58,7 +58,7 @@ id = "df97eb00985b42b9b45c7d4224cb10ab"
 [[d1_databases]]
 binding = "MESSAGING_DB"
 database_name = "orbit-command-center-messaging"
-database_id = "3034eb2d-6fa3-4316-a42f-255123d5f8a7"
+database_id = "2eb37b46-5f8a-42ba-939a-6ee0542ab536"
 
 # ALERTS_INGEST_SECRET is NOT here on purpose, same reasoning as CF_API_TOKEN above: it's the
 # shared secret n8n's alert-dispatcher workflow uses to authenticate to POST /api/alerts (a
